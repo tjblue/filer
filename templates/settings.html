@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Settings - Filer</title>
+    <script>
+        (function() {
+            var t = localStorage.getItem('filer-theme');
+            var f = localStorage.getItem('filer-fontSize');
+            if (t && t !== 'dark') document.documentElement.classList.add('theme-' + t);
+            if (f && f !== 'medium') document.documentElement.classList.add('font-' + f);
+        })();
+    </script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <link rel="stylesheet" href="/_static/style.css">
+</head>
+<body class="bg-gray-900 min-h-screen">
+    <div class="max-w-6xl mx-auto p-4">
+        <!-- Header -->
+        <div class="bg-gray-800 rounded-lg shadow-sm border border-gray-700 p-4 mb-4">
+            <div class="flex items-center gap-3">
+                <a href="/" class="p-2 hover:bg-gray-700 rounded" title="Back to Files">
+                    <i data-lucide="arrow-left" class="w-5 h-5 text-gray-300"></i>
+                </a>
+                <h1 class="text-xl font-semibold text-gray-100 flex items-center gap-2">
+                    <i data-lucide="settings" class="w-6 h-6 text-gray-400"></i>
+                    Settings
+                </h1>
+            </div>
+        </div>
+
+        <!-- Theme Section -->
+        <div class="bg-gray-800 rounded-lg shadow-sm border border-gray-700 p-6 mb-4">
+            <h2 class="text-lg font-medium text-gray-100 mb-1">Theme</h2>
+            <p class="text-sm text-gray-400 mb-4">Choose the appearance of the interface.</p>
+            <div class="flex gap-3" id="themeOptions">
+                <button onclick="setSetting('theme', 'dark')" data-value="dark"
+                    class="setting-btn flex-1 p-4 rounded-lg border-2 text-center transition-all">
+                    <i data-lucide="moon" class="w-6 h-6 mx-auto mb-2"></i>
+                    <span class="text-sm font-medium">Dark</span>
+                </button>
+                <button onclick="setSetting('theme', 'light')" data-value="light"
+                    class="setting-btn flex-1 p-4 rounded-lg border-2 text-center transition-all">
+                    <i data-lucide="sun" class="w-6 h-6 mx-auto mb-2"></i>
+                    <span class="text-sm font-medium">Light</span>
+                </button>
+            </div>
+        </div>
+
+        <!-- Font Size Section -->
+        <div class="bg-gray-800 rounded-lg shadow-sm border border-gray-700 p-6 mb-4">
+            <h2 class="text-lg font-medium text-gray-100 mb-1">Font Size</h2>
+            <p class="text-sm text-gray-400 mb-4">Adjust the text size across the interface.</p>
+            <div class="flex gap-3" id="fontSizeOptions">
+                <button onclick="setSetting('fontSize', 'sm')" data-value="sm"
+                    class="setting-btn flex-1 p-4 rounded-lg border-2 text-center transition-all">
+                    <span class="text-xs font-medium">A</span>
+                    <span class="block text-sm font-medium mt-1">Small</span>
+                </button>
+                <button onclick="setSetting('fontSize', 'medium')" data-value="medium"
+                    class="setting-btn flex-1 p-4 rounded-lg border-2 text-center transition-all">
+                    <span class="text-base font-medium">A</span>
+                    <span class="block text-sm font-medium mt-1">Medium</span>
+                </button>
+                <button onclick="setSetting('fontSize', 'lg')" data-value="lg"
+                    class="setting-btn flex-1 p-4 rounded-lg border-2 text-center transition-all">
+                    <span class="text-xl font-medium">A</span>
+                    <span class="block text-sm font-medium mt-1">Large</span>
+                </button>
+            </div>
+        </div>
+
+        <!-- Preview Scale Section -->
+        <div class="bg-gray-800 rounded-lg shadow-sm border border-gray-700 p-6 mb-4">
+            <h2 class="text-lg font-medium text-gray-100 mb-1">Preview Scale</h2>
+            <p class="text-sm text-gray-400 mb-4">Show image and PDF thumbnails instead of icons in directory listings.</p>
+            <div class="flex gap-3" id="previewScaleOptions">
+                <button onclick="setSetting('previewScale', 'off')" data-value="off"
+                    class="setting-btn flex-1 p-4 rounded-lg border-2 text-center transition-all">
+                    <i data-lucide="eye-off" class="w-6 h-6 mx-auto mb-2"></i>
+                    <span class="text-sm font-medium">Off</span>
+                </button>
+                <button onclick="setSetting('previewScale', 'sm')" data-value="sm"
+                    class="setting-btn flex-1 p-4 rounded-lg border-2 text-center transition-all">
+                    <i data-lucide="image" class="w-4 h-4 mx-auto mb-2"></i>
+                    <span class="text-sm font-medium">Small</span>
+                </button>
+                <button onclick="setSetting('previewScale', 'md')" data-value="md"
+                    class="setting-btn flex-1 p-4 rounded-lg border-2 text-center transition-all">
+                    <i data-lucide="image" class="w-6 h-6 mx-auto mb-2"></i>
+                    <span class="text-sm font-medium">Medium</span>
+                </button>
+                <button onclick="setSetting('previewScale', 'lg')" data-value="lg"
+                    class="setting-btn flex-1 p-4 rounded-lg border-2 text-center transition-all">
+                    <i data-lucide="image" class="w-8 h-8 mx-auto mb-2"></i>
+                    <span class="text-sm font-medium">Large</span>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast -->
+    <div id="toast" class="toast-container fixed bottom-4 right-4 z-50">
+        <div class="toast-inner flex items-center gap-2.5 px-4 py-3 rounded-lg shadow-lg border bg-gray-800 border-gray-700 text-sm">
+            <span id="toastIcon" class="flex-shrink-0"></span>
+            <span id="toastMessage" class="text-gray-100"></span>
+        </div>
+    </div>
+
+    <script>
+    let currentSettings = { theme: 'dark', fontSize: 'medium', previewScale: 'off' };
+
+    document.addEventListener('DOMContentLoaded', async () => {
+        lucide.createIcons();
+        try {
+            const res = await fetch('/settings/api');
+            currentSettings = await res.json();
+        } catch (e) {}
+        applySettings(currentSettings);
+        updateButtons();
+    });
+
+    function applySettings(s) {
+        // Theme
+        document.documentElement.classList.remove('theme-light');
+        if (s.theme === 'light') document.documentElement.classList.add('theme-light');
+        localStorage.setItem('filer-theme', s.theme);
+
+        // Font size
+        document.documentElement.classList.remove('font-sm', 'font-lg');
+        if (s.fontSize === 'sm') document.documentElement.classList.add('font-sm');
+        else if (s.fontSize === 'lg') document.documentElement.classList.add('font-lg');
+        localStorage.setItem('filer-fontSize', s.fontSize);
+
+        // Preview scale
+        localStorage.setItem('filer-previewScale', s.previewScale || 'off');
+    }
+
+    function updateButtons() {
+        // Theme buttons
+        document.querySelectorAll('#themeOptions .setting-btn').forEach(btn => {
+            const active = btn.dataset.value === currentSettings.theme;
+            btn.className = 'setting-btn flex-1 p-4 rounded-lg border-2 text-center transition-all ' +
+                (active
+                    ? 'border-blue-500 bg-blue-500/10 text-blue-400'
+                    : 'border-gray-600 bg-gray-700 text-gray-300 hover:border-gray-500');
+        });
+        // Font size buttons
+        document.querySelectorAll('#fontSizeOptions .setting-btn').forEach(btn => {
+            const active = btn.dataset.value === currentSettings.fontSize;
+            btn.className = 'setting-btn flex-1 p-4 rounded-lg border-2 text-center transition-all ' +
+                (active
+                    ? 'border-blue-500 bg-blue-500/10 text-blue-400'
+                    : 'border-gray-600 bg-gray-700 text-gray-300 hover:border-gray-500');
+        });
+        // Preview scale buttons
+        document.querySelectorAll('#previewScaleOptions .setting-btn').forEach(btn => {
+            const active = btn.dataset.value === (currentSettings.previewScale || 'off');
+            btn.className = 'setting-btn flex-1 p-4 rounded-lg border-2 text-center transition-all ' +
+                (active
+                    ? 'border-blue-500 bg-blue-500/10 text-blue-400'
+                    : 'border-gray-600 bg-gray-700 text-gray-300 hover:border-gray-500');
+        });
+    }
+
+    async function setSetting(key, value) {
+        currentSettings[key] = value;
+        applySettings(currentSettings);
+        updateButtons();
+        try {
+            await fetch('/settings/api', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ [key]: value })
+            });
+            showToast('Settings saved', 'success');
+        } catch (e) {
+            showToast('Failed to save settings', 'error');
+        }
+    }
+
+    // Toast
+    let toastTimeout = null;
+    const toastIcons = {
+        success: '<i data-lucide="check-circle" class="w-4 h-4 text-green-400"></i>',
+        error:   '<i data-lucide="alert-circle" class="w-4 h-4 text-red-400"></i>',
+        info:    '<i data-lucide="info" class="w-4 h-4 text-blue-400"></i>'
+    };
+
+    function showToast(message, type = 'info') {
+        const container = document.getElementById('toast');
+        const inner = container.querySelector('.toast-inner');
+        document.getElementById('toastIcon').innerHTML = toastIcons[type] || toastIcons.info;
+        document.getElementById('toastMessage').textContent = message;
+        inner.classList.remove('toast-accent-success', 'toast-accent-error', 'toast-accent-info');
+        inner.classList.add('toast-accent-' + type);
+        container.classList.add('toast-visible');
+        lucide.createIcons();
+        if (toastTimeout) clearTimeout(toastTimeout);
+        toastTimeout = setTimeout(() => container.classList.remove('toast-visible'), 3000);
+    }
+    </script>
+</body>
+</html>

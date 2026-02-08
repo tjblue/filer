@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Filer</title>
+    <script>
+        (function() {
+            var t = localStorage.getItem('filer-theme');
+            var f = localStorage.getItem('filer-fontSize');
+            if (t && t !== 'dark') document.documentElement.classList.add('theme-' + t);
+            if (f && f !== 'medium') document.documentElement.classList.add('font-' + f);
+        })();
+    </script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+
+    <!-- CodeMirror 5 -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/codemirror.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/theme/monokai.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/codemirror.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/mode/javascript/javascript.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/mode/python/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/mode/htmlmixed/htmlmixed.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/mode/css/css.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/mode/xml/xml.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/mode/yaml/yaml.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/mode/markdown/markdown.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/mode/shell/shell.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/addon/edit/closebrackets.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/addon/edit/matchbrackets.min.js"></script>
+    <link rel="stylesheet" href="/_static/style.css">
+</head>
+<body class="bg-gray-900 min-h-screen">
+    <div id="app" class="max-w-6xl mx-auto p-4">
+        <!-- Header -->
+        <div class="bg-gray-800 rounded-lg shadow-sm border border-gray-700 p-4 mb-4">
+            <div class="flex items-center justify-between gap-4">
+                <div class="flex items-center gap-4 flex-wrap">
+                    <h1 class="text-xl font-semibold text-gray-100 flex items-center gap-2">
+                        <i data-lucide="folder-open" class="w-6 h-6 text-blue-400"></i>
+                        Filer
+                    </h1>
+                    <!-- Toolbar Pills -->
+                <div id="toolbar" class="flex flex-wrap items-center gap-2">
+                    <button id="newFileBtn" onclick="showNewFileModal()" class="px-3 py-1.5 bg-gray-700 text-gray-200 text-sm rounded-full shadow hover:bg-gray-600 hover:shadow-lg transition-all duration-200 flex items-center gap-2 border border-gray-600">
+                        <i data-lucide="file-plus" class="w-4 h-4 text-blue-400"></i> New File
+                    </button>
+                    <button id="newFolderBtn" onclick="showNewFolderModal()" class="px-3 py-1.5 bg-gray-700 text-gray-200 text-sm rounded-full shadow hover:bg-gray-600 hover:shadow-lg transition-all duration-200 flex items-center gap-2 border border-gray-600">
+                        <i data-lucide="folder-plus" class="w-4 h-4 text-yellow-400"></i> New Folder
+                    </button>
+                    <button id="uploadBtn" onclick="document.getElementById('uploadInput').click()" class="px-3 py-1.5 bg-gray-700 text-gray-200 text-sm rounded-full shadow hover:bg-gray-600 hover:shadow-lg transition-all duration-200 flex items-center gap-2 border border-gray-600">
+                        <i data-lucide="upload" class="w-4 h-4 text-green-400"></i> Upload
+                    </button>
+                    <input type="file" id="uploadInput" multiple class="hidden" onchange="uploadFiles(this.files)">
+                    <!-- Selection actions (shown when files selected) -->
+                    <button onclick="showMoveModal()" id="moveBtn" class="hidden px-3 py-1.5 bg-gray-700 text-gray-200 text-sm rounded-full shadow hover:bg-gray-600 hover:shadow-lg transition-all duration-200 items-center gap-2 border border-gray-600">
+                        <i data-lucide="move" class="w-4 h-4 text-purple-400"></i> Move
+                    </button>
+                    <button onclick="downloadSelectedAsZip()" id="zipBtn" class="hidden px-3 py-1.5 bg-gray-700 text-gray-200 text-sm rounded-full shadow hover:bg-gray-600 hover:shadow-lg transition-all duration-200 items-center gap-2 border border-gray-600">
+                        <i data-lucide="archive" class="w-4 h-4 text-blue-400"></i> Download .zip
+                    </button>
+                    <button onclick="deleteSelected()" id="deleteBtn" class="hidden px-3 py-1.5 bg-gray-700 text-gray-200 text-sm rounded-full shadow hover:bg-gray-600 hover:shadow-lg transition-all duration-200 items-center gap-2 border border-gray-600">
+                        <i data-lucide="trash-2" class="w-4 h-4 text-red-400"></i> Delete
+                    </button>
+                    <!-- More menu (always last) -->
+                    <div class="relative flex items-center">
+                        <button onclick="toggleMoreMenu()" id="moreMenuBtn" class="px-3 py-1.5 bg-gray-700 text-gray-200 text-sm rounded-full shadow hover:bg-gray-600 hover:shadow-lg transition-all duration-200 flex items-center gap-2 border border-gray-600">
+                            <i data-lucide="chevron-down" class="w-4 h-4"></i> More
+                        </button>
+                        <div id="moreMenu" class="hidden absolute left-0 top-full mt-1 bg-gray-800 border border-gray-600 rounded-lg shadow-xl z-50 py-1 min-w-[160px]">
+                            <a href="/napkins/" class="flex items-center gap-2 px-4 py-2 text-sm text-gray-200 hover:bg-gray-700 no-underline">
+                                <i data-lucide="shredder" class="w-4 h-4 text-blue-400"></i> Napkins
+                            </a>
+                            <a href="/trash/" class="flex items-center gap-2 px-4 py-2 text-sm text-gray-200 hover:bg-gray-700 no-underline">
+                                <i data-lucide="trash-2" class="w-4 h-4 text-gray-400"></i> Trash
+                            </a>
+                            <a href="/settings/" class="flex items-center gap-2 px-4 py-2 text-sm text-gray-200 hover:bg-gray-700 no-underline">
+                                <i data-lucide="settings" class="w-4 h-4 text-gray-400"></i> Settings
+                            </a>
+                        </div>
+                    </div>
+                </div>
+                </div>
+                <!-- Search Bar -->
+                <div class="flex items-center gap-2">
+                    <div class="relative">
+                        <input type="text" id="searchInput" placeholder="Search files..."
+                               class="pl-9 pr-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-sm w-64 outline-none focus:border-blue-500 text-gray-100 placeholder-gray-400">
+                        <i data-lucide="search" class="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2"></i>
+                    </div>
+                    <button onclick="performSearch()" class="px-3 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700">
+                        Search
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Breadcrumbs -->
+        <div id="breadcrumbsBar" class="mb-4 px-1">
+            <div id="breadcrumbs" class="flex items-center gap-1 text-sm text-gray-400 flex-wrap">
+                <span class="breadcrumb cursor-pointer text-blue-400" data-path="">Root</span>
+            </div>
+        </div>
+
+        <!-- File List View -->
+        <div id="fileListView">
+            <div class="bg-gray-800 rounded-lg shadow-sm border border-gray-700 overflow-hidden">
+                <table class="w-full">
+                    <thead class="bg-gray-750 border-b border-gray-700" style="background-color: rgb(42 48 60);">
+                        <tr>
+                            <th class="w-10 p-3">
+                                <input type="checkbox" id="selectAll" onchange="toggleSelectAll()" class="rounded bg-gray-700 border-gray-600">
+                            </th>
+                            <th class="text-left p-3 text-sm font-medium text-gray-300 cursor-pointer hover:bg-gray-700 rounded" onclick="sortFiles('name')">
+                                Name <span id="sortName" class="text-xs text-gray-500"></span>
+                            </th>
+                            <th class="text-left p-3 text-sm font-medium text-gray-300 w-24 cursor-pointer hover:bg-gray-700 rounded" onclick="sortFiles('size')">
+                                Size <span id="sortSize" class="text-xs text-gray-500"></span>
+                            </th>
+                            <th class="text-left p-3 text-sm font-medium text-gray-300 w-44 cursor-pointer hover:bg-gray-700 rounded" onclick="sortFiles('modified')">
+                                Modified <span id="sortModified" class="text-xs text-gray-500"></span>
+                            </th>
+                            <th class="w-36 p-3 text-sm font-medium text-gray-300 text-right">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="fileList">
+                    </tbody>
+                </table>
+                <div id="emptyState" class="hidden p-8 text-center text-gray-400">
+                    <i data-lucide="folder-open" class="w-12 h-12 mx-auto mb-2 opacity-50"></i>
+                    <p>This folder is empty</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Search Results View -->
+        <div id="searchResultsView" class="hidden">
+            <div class="bg-gray-800 rounded-lg shadow-sm border border-gray-700 overflow-hidden">
+                <div class="p-4 border-b border-gray-700 flex items-center justify-between" style="background-color: rgb(42 48 60);">
+                    <div class="flex items-center gap-2">
+                        <i data-lucide="search" class="w-5 h-5 text-gray-400"></i>
+                        <span id="searchResultsTitle" class="font-medium text-gray-100">Search Results</span>
+                    </div>
+                    <button onclick="closeSearch()" class="px-3 py-1 text-sm text-gray-300 hover:bg-gray-700 rounded flex items-center gap-1">
+                        <i data-lucide="x" class="w-4 h-4"></i> Close
+                    </button>
+                </div>
+                <div id="searchResultsList" class="divide-y divide-gray-700">
+                </div>
+                <div id="searchEmptyState" class="hidden p-8 text-center text-gray-400">
+                    <i data-lucide="search-x" class="w-12 h-12 mx-auto mb-2 opacity-50"></i>
+                    <p>No results found</p>
+                </div>
+                <div id="searchTruncatedMsg" class="hidden p-3 bg-yellow-900 text-yellow-200 text-sm text-center">
+                    Results limited. Try a more specific search.
+                </div>
+            </div>
+        </div>
+
+        <!-- File Viewer View -->
+        <div id="fileViewerView" class="hidden">
+            <div class="bg-gray-800 rounded-lg shadow-sm border border-gray-700 overflow-hidden">
+                <!-- File Viewer Header -->
+                <div class="flex items-center justify-between p-4 border-b border-gray-700" style="background-color: rgb(42 48 60);">
+                    <div class="flex items-center gap-3">
+                        <button onclick="goToParentFolder()" class="p-2 hover:bg-gray-700 rounded" title="Back to folder">
+                            <i data-lucide="arrow-left" class="w-5 h-5 text-gray-300"></i>
+                        </button>
+                        <div>
+                            <h2 id="viewerFileName" class="font-medium text-gray-100"></h2>
+                            <p id="viewerFileMeta" class="text-sm text-gray-400"></p>
+                        </div>
+                    </div>
+                    <div class="flex gap-2">
+                        <button onclick="downloadCurrentFile()" class="px-3 py-1.5 bg-gray-700 text-gray-200 text-sm rounded hover:bg-gray-600 flex items-center gap-1">
+                            <i data-lucide="download" class="w-4 h-4"></i> Download
+                        </button>
+                        <button onclick="enableEditMode()" id="editFileBtn" class="px-3 py-1.5 bg-gray-700 text-gray-200 text-sm rounded hover:bg-gray-600 flex items-center gap-1">
+                            <i data-lucide="file-pen" class="w-4 h-4"></i> Edit
+                        </button>
+                        <button onclick="saveCurrentFile()" id="saveFileBtn" class="hidden px-3 py-1.5 bg-blue-600 text-white text-sm rounded hover:bg-blue-700 flex items-center gap-1">
+                            <i data-lucide="save" class="w-4 h-4"></i> Save
+                        </button>
+                    </div>
+                </div>
+                <!-- File Content -->
+                <div id="fileContentWrapper" class="bg-gray-800 relative">
+                    <!-- CodeMirror container -->
+                    <div id="codeMirrorEditor" class="hidden"></div>
+                    <!-- Fallback textarea for unsupported file types -->
+                    <textarea id="fileContent" class="w-full p-6 border-none outline-none min-h-[70vh] resize-none bg-transparent text-gray-100 relative z-10" readonly spellcheck="false"></textarea>
+                </div>
+                <!-- Image Viewer -->
+                <div id="imageViewer" class="hidden p-6 flex items-center justify-center bg-gray-900" style="min-height: 300px;">
+                    <img id="imageFrame" class="max-w-full max-h-[80vh] object-contain rounded" alt="">
+                </div>
+                <!-- PDF Viewer -->
+                <div id="pdfViewer" class="hidden">
+                    <iframe id="pdfFrame" class="w-full border-none" style="height: 80vh;"></iframe>
+                </div>
+                <!-- Binary File Message -->
+                <div id="binaryFileMessage" class="hidden p-8 text-center text-gray-400">
+                    <i data-lucide="file-x" class="w-12 h-12 mx-auto mb-2 opacity-50"></i>
+                    <p>This is a binary file and cannot be displayed.</p>
+                    <button onclick="downloadCurrentFile()" class="mt-4 px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700">
+                        Download File
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- New File/Folder Modal -->
+    <div id="newItemModal" class="fixed inset-0 hidden z-50 flex items-center justify-center">
+        <div class="modal-backdrop absolute inset-0" onclick="closeNewItemModal()"></div>
+        <div class="relative bg-gray-800 border border-gray-700 rounded-lg shadow-xl p-6 w-96">
+            <h2 id="newItemTitle" class="font-medium text-gray-100 mb-4">New File</h2>
+            <input type="text" id="newItemName" placeholder="Enter name..." class="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded mb-4 outline-none focus:border-blue-500 text-gray-100 placeholder-gray-400">
+            <div class="flex gap-2 justify-end">
+                <button onclick="closeNewItemModal()" class="px-4 py-2 bg-gray-700 text-gray-200 text-sm rounded hover:bg-gray-600">Cancel</button>
+                <button onclick="createNewItem()" class="px-4 py-2 bg-blue-600 text-white text-sm rounded hover:bg-blue-700">Create</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Move Modal -->
+    <div id="moveModal" class="fixed inset-0 hidden z-50 flex items-center justify-center">
+        <div class="modal-backdrop absolute inset-0" onclick="closeMoveModal()"></div>
+        <div class="relative bg-gray-800 border border-gray-700 rounded-lg shadow-xl p-6 w-[450px]">
+            <h2 class="font-medium text-gray-100 mb-4">Move to...</h2>
+            <div id="folderTree" class="bg-gray-900 border border-gray-700 rounded p-3 mb-4 max-h-80 overflow-y-auto">
+                <div class="text-gray-400 text-sm">Loading folders...</div>
+            </div>
+            <div class="flex items-center justify-between">
+                <div class="text-sm text-gray-400">
+                    Selected: <span id="moveDestinationDisplay" class="text-blue-400">Root</span>
+                </div>
+                <div class="flex gap-2">
+                    <button onclick="closeMoveModal()" class="px-4 py-2 bg-gray-700 text-gray-200 text-sm rounded hover:bg-gray-600">Cancel</button>
+                    <button onclick="moveSelected()" class="px-4 py-2 bg-purple-600 text-white text-sm rounded hover:bg-purple-700">Move Here</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Rename Modal -->
+    <div id="renameModal" class="fixed inset-0 hidden z-50 flex items-center justify-center">
+        <div class="modal-backdrop absolute inset-0" onclick="closeRenameModal()"></div>
+        <div class="relative bg-gray-800 border border-gray-700 rounded-lg shadow-xl p-6 w-96">
+            <h2 class="font-medium text-gray-100 mb-4">Rename</h2>
+            <input type="text" id="renameName" class="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded mb-4 outline-none focus:border-blue-500 text-gray-100">
+            <div class="flex gap-2 justify-end">
+                <button onclick="closeRenameModal()" class="px-4 py-2 bg-gray-700 text-gray-200 text-sm rounded hover:bg-gray-600">Cancel</button>
+                <button onclick="renameItem()" class="px-4 py-2 bg-blue-600 text-white text-sm rounded hover:bg-blue-700">Rename</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Confirmation Modal -->
+    <div id="confirmModal" class="fixed inset-0 hidden z-50 flex items-center justify-center">
+        <div class="modal-backdrop absolute inset-0" onclick="closeConfirmModal(false)"></div>
+        <div class="relative bg-gray-800 border border-gray-700 rounded-lg shadow-xl p-6 w-96">
+            <h2 id="confirmTitle" class="font-medium text-gray-100 mb-2">Confirm Action</h2>
+            <p id="confirmMessage" class="text-gray-300 text-sm mb-4"></p>
+            <div class="flex gap-2 justify-end">
+                <button onclick="closeConfirmModal(false)" class="px-4 py-2 bg-gray-700 text-gray-200 text-sm rounded hover:bg-gray-600">Cancel</button>
+                <button id="confirmButton" onclick="closeConfirmModal(true)" class="px-4 py-2 bg-red-600 text-white text-sm rounded hover:bg-red-700">
+                    <span id="confirmButtonText">Delete</span>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Drop Zone Overlay -->
+    <div id="dropZone" class="fixed inset-0 z-40 hidden">
+        <div class="absolute inset-0 bg-gray-900 bg-opacity-90"></div>
+        <div class="absolute inset-8 border-4 border-dashed border-blue-500 rounded-2xl flex items-center justify-center">
+            <div class="text-center">
+                <i data-lucide="upload-cloud" class="w-20 h-20 text-blue-400 mx-auto mb-4"></i>
+                <p class="text-2xl font-medium text-gray-100">Drop files here to upload</p>
+                <p class="text-gray-400 mt-2">Files will be uploaded to the current folder</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Download Progress Box (bottom-right, non-blocking) -->
+    <div id="downloadProgressBox" class="fixed bottom-4 left-4 hidden z-50 bg-gray-800 border border-gray-700 rounded-lg shadow-xl p-4 w-80">
+        <div class="flex items-center justify-between mb-2">
+            <span class="text-sm font-medium text-gray-100 truncate pr-2" id="downloadFileName" title="">Downloading...</span>
+            <button onclick="cancelActiveDownload()" class="p-1 hover:bg-gray-700 rounded text-gray-400 hover:text-red-400 flex-shrink-0" title="Cancel download">
+                <i data-lucide="x" class="w-4 h-4"></i>
+            </button>
+        </div>
+        <div class="w-full bg-gray-700 rounded-full h-2 mb-2 overflow-hidden">
+            <div id="downloadProgressBar" class="bg-blue-500 h-2 rounded-full transition-all duration-200" style="width: 0%"></div>
+        </div>
+        <div class="flex items-center justify-between text-xs text-gray-400">
+            <span><span id="downloadProgressPercent">0%</span> &middot; <span id="downloadSpeed">0 B/s</span></span>
+            <span id="downloadProgressSize">0 B / 0 B</span>
+        </div>
+    </div>
+
+    <!-- Toast -->
+    <div id="toast" class="toast-container fixed bottom-4 right-4 z-50">
+        <div class="toast-inner flex items-center gap-2.5 px-4 py-3 rounded-lg shadow-lg border bg-gray-800 border-gray-700 text-sm">
+            <span id="toastIcon" class="flex-shrink-0"></span>
+            <span id="toastMessage" class="text-gray-100"></span>
+        </div>
+    </div>
+
+    <script src="/_static/app.js"></script>
+</body>
+</html>

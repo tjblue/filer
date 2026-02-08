@@ -1,0 +1,468 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Napkins - Filer</title>
+    <script>
+        (function() {
+            var t = localStorage.getItem('filer-theme');
+            var f = localStorage.getItem('filer-fontSize');
+            if (t && t !== 'dark') document.documentElement.classList.add('theme-' + t);
+            if (f && f !== 'medium') document.documentElement.classList.add('font-' + f);
+        })();
+    </script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        .drop-zone-hover { background-color: rgb(55 65 81); }
+    </style>
+</head>
+<body class="bg-gray-900 min-h-screen">
+    <div id="app" class="max-w-6xl mx-auto p-4">
+        <!-- Header -->
+        <div class="bg-gray-800 rounded-lg shadow-sm border border-gray-700 p-4 mb-4">
+            <div class="flex items-center justify-between gap-4">
+                <div class="flex items-center gap-3">
+                    <a href="/" class="p-2 hover:bg-gray-700 rounded" title="Back to Files">
+                        <i data-lucide="arrow-left" class="w-5 h-5 text-gray-300"></i>
+                    </a>
+                    <div>
+                        <h1 class="text-xl font-semibold text-gray-100 flex items-center gap-2">
+                            <i data-lucide="shredder" class="w-6 h-6 text-blue-400"></i>
+                            Napkins
+                        </h1>
+                        <p class="text-sm text-gray-400 mt-0.5">Temporary file and text sharing with automatic expiration</p>
+                    </div>
+                </div>
+                <!-- div class="bg-gray-700 px-3 py-1.5 rounded text-sm text-blue-400 border border-gray-600">
+                    {{ network_ip }}
+                </div-->
+            </div>
+        </div>
+
+        <!-- Items List -->
+        <div class="bg-gray-800 rounded-lg shadow-sm border border-gray-700 overflow-hidden mb-4">
+            <div class="p-4 border-b border-gray-700 flex items-center justify-between" style="background-color: rgb(42 48 60);">
+                <h2 class="text-lg font-medium text-gray-100 flex items-center gap-2">
+                    <i data-lucide="clock" class="w-5 h-5 text-orange-400"></i>
+                    Temporary Items
+                </h2>
+                <button onclick="refreshItems()" class="px-3 py-1 text-xs text-gray-400 hover:text-gray-200 hover:bg-gray-700 rounded flex items-center gap-1">
+                    <i data-lucide="refresh-cw" class="w-3 h-3"></i> Refresh
+                </button>
+            </div>
+            <div id="items-list" class="p-4">
+                <div class="text-center text-gray-500 py-8">
+                    <i data-lucide="inbox" class="w-12 h-12 mx-auto mb-2 opacity-50"></i>
+                    <p>No temporary items yet</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Upload Section with Tabs -->
+        <div class="bg-gray-800 rounded-lg shadow-sm border border-gray-700 overflow-hidden mb-4">
+            <!-- Tabs -->
+            <div class="border-b border-gray-700 flex" style="background-color: rgb(42 48 60);">
+                <button id="tab-files" onclick="switchTab('files')" class="flex-1 px-4 py-3 text-sm font-medium text-gray-100 border-b-2 border-blue-500 flex items-center justify-center gap-2">
+                    <i data-lucide="upload" class="w-4 h-4"></i>
+                    Upload Files
+                </button>
+                <button id="tab-text" onclick="switchTab('text')" class="flex-1 px-4 py-3 text-sm font-medium text-gray-500 border-b-2 border-transparent hover:text-gray-300 flex items-center justify-center gap-2">
+                    <i data-lucide="file-text" class="w-4 h-4"></i>
+                    Upload Text
+                </button>
+            </div>
+
+            <!-- Tab Content -->
+            <div class="p-6">
+                <!-- Files Tab -->
+                <div id="content-files">
+                    <div id="drop-zone" class="border-2 border-dashed border-gray-600 rounded-lg p-12 text-center cursor-pointer hover:border-blue-500 hover:bg-gray-750 transition-all bg-gray-900">
+                        <i data-lucide="upload-cloud" class="w-16 h-16 text-gray-500 mx-auto mb-3"></i>
+                        <p class="text-gray-300 mb-1">Drop files here or click to browse</p>
+                        <p class="text-xs text-gray-500">Maximum file size: 100MB</p>
+                    </div>
+                    <input type="file" id="file-input" multiple class="hidden">
+
+                    <div class="flex items-center gap-3 mt-4">
+                        <label class="text-sm text-gray-400">Expires in:</label>
+                        <select id="file-expiry" class="bg-gray-700 text-gray-200 border border-gray-600 rounded px-3 py-2 text-sm outline-none focus:border-blue-500">
+                            <option value="1">1 hour</option>
+                            <option value="2" selected>2 hours</option>
+                            <option value="6">6 hours</option>
+                            <option value="12">12 hours</option>
+                            <option value="24">24 hours</option>
+                            <option value="72">3 days</option>
+                            <option value="168">7 days</option>
+                        </select>
+                    </div>
+
+                    <!-- Upload Progress -->
+                    <div id="upload-progress" class="hidden mt-4">
+                        <div class="bg-gray-700 rounded-full h-2 overflow-hidden">
+                            <div id="progress-fill" class="bg-blue-500 h-full transition-all duration-300" style="width: 0%"></div>
+                        </div>
+                        <p id="progress-text" class="text-xs text-gray-400 mt-2">Uploading...</p>
+                    </div>
+                </div>
+
+                <!-- Text Tab -->
+                <div id="content-text" class="hidden">
+                    <form id="text-form" class="space-y-3">
+                        <input type="text" id="text-title" placeholder="Title (optional)"
+                               class="w-full bg-gray-700 text-gray-200 border border-gray-600 rounded px-3 py-2 text-sm outline-none focus:border-blue-500 placeholder-gray-500">
+                        <textarea id="text-content" placeholder="Paste your text, code, or notes here..."
+                                  class="w-full bg-gray-700 text-gray-200 border border-gray-600 rounded px-3 py-2 text-sm min-h-[120px] font-mono outline-none focus:border-blue-500 placeholder-gray-500"></textarea>
+                        <div class="flex items-center gap-3">
+                            <label class="text-sm text-gray-400">Expires in:</label>
+                            <select id="text-expiry" class="bg-gray-700 text-gray-200 border border-gray-600 rounded px-3 py-2 text-sm outline-none focus:border-blue-500">
+                                <option value="1">1 hour</option>
+                                <option value="2" selected>2 hours</option>
+                                <option value="6">6 hours</option>
+                                <option value="12">12 hours</option>
+                                <option value="24">24 hours</option>
+                                <option value="72">3 days</option>
+                                <option value="168">7 days</option>
+                            </select>
+                        </div>
+                        <button type="submit" class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 text-sm font-medium">
+                            Save Text
+                        </button>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast -->
+    <div id="toast" class="fixed bottom-4 right-4 px-4 py-2 rounded-lg shadow-lg text-white transform translate-y-20 transition-transform duration-300 border border-gray-600"></div>
+
+    <script>
+        // Initialize Lucide icons
+        lucide.createIcons();
+
+        // Tab switching
+        function switchTab(tab) {
+            const tabFiles = document.getElementById('tab-files');
+            const tabText = document.getElementById('tab-text');
+            const contentFiles = document.getElementById('content-files');
+            const contentText = document.getElementById('content-text');
+
+            if (tab === 'files') {
+                // Activate files tab
+                tabFiles.className = 'flex-1 px-4 py-3 text-sm font-medium text-gray-100 border-b-2 border-blue-500 flex items-center justify-center gap-2';
+                tabText.className = 'flex-1 px-4 py-3 text-sm font-medium text-gray-500 border-b-2 border-transparent hover:text-gray-300 flex items-center justify-center gap-2';
+                contentFiles.classList.remove('hidden');
+                contentText.classList.add('hidden');
+            } else {
+                // Activate text tab
+                tabText.className = 'flex-1 px-4 py-3 text-sm font-medium text-gray-100 border-b-2 border-blue-500 flex items-center justify-center gap-2';
+                tabFiles.className = 'flex-1 px-4 py-3 text-sm font-medium text-gray-500 border-b-2 border-transparent hover:text-gray-300 flex items-center justify-center gap-2';
+                contentText.classList.remove('hidden');
+                contentFiles.classList.add('hidden');
+            }
+
+            // Re-initialize icons after content change
+            lucide.createIcons();
+        }
+
+        const dropZone = document.getElementById('drop-zone');
+        const fileInput = document.getElementById('file-input');
+        const fileExpiry = document.getElementById('file-expiry');
+        const textForm = document.getElementById('text-form');
+        const textTitle = document.getElementById('text-title');
+        const textContent = document.getElementById('text-content');
+        const textExpiry = document.getElementById('text-expiry');
+        const itemsList = document.getElementById('items-list');
+        const uploadProgress = document.getElementById('upload-progress');
+        const progressFill = document.getElementById('progress-fill');
+        const progressText = document.getElementById('progress-text');
+        const toast = document.getElementById('toast');
+
+        // Toast notifications
+        function showToast(message, type = 'info') {
+            toast.textContent = message;
+            const colors = {
+                error: 'bg-red-500',
+                success: 'bg-green-500',
+                info: 'bg-blue-500'
+            };
+            toast.className = `fixed bottom-4 right-4 px-4 py-2 rounded-lg shadow-lg text-white transition-transform duration-300 border border-gray-600 ${colors[type]}`;
+            toast.style.transform = 'translateY(0)';
+            setTimeout(() => {
+                toast.style.transform = 'translateY(100px)';
+            }, 3000);
+        }
+
+        // Format file size
+        function formatSize(bytes) {
+            if (bytes < 1024) return bytes + ' B';
+            if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+            if (bytes < 1024 * 1024 * 1024) return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+            return (bytes / (1024 * 1024 * 1024)).toFixed(1) + ' GB';
+        }
+
+        // Format time remaining
+        function formatTimeRemaining(expiresAt) {
+            const now = new Date();
+            const expires = new Date(expiresAt);
+            const diff = expires - now;
+
+            if (diff <= 0) return 'Expired';
+
+            const hours = Math.floor(diff / (1000 * 60 * 60));
+            const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+
+            if (hours >= 24) {
+                const days = Math.floor(hours / 24);
+                const remainingHours = hours % 24;
+                return days + 'd ' + remainingHours + 'h';
+            }
+            if (hours > 0) return hours + 'h ' + minutes + 'm';
+            return minutes + 'm';
+        }
+
+        // Check if expiring soon (< 1 hour)
+        function isExpiringSoon(expiresAt) {
+            const expires = new Date(expiresAt);
+            const now = new Date();
+            const diff = expires - now;
+            return diff > 0 && diff < 3600000;
+        }
+
+        // Drop zone events
+        dropZone.addEventListener('click', () => fileInput.click());
+
+        dropZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            dropZone.classList.add('drop-zone-hover', 'border-blue-500');
+        });
+
+        dropZone.addEventListener('dragleave', () => {
+            dropZone.classList.remove('drop-zone-hover', 'border-blue-500');
+        });
+
+        dropZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dropZone.classList.remove('drop-zone-hover', 'border-blue-500');
+            if (e.dataTransfer.files.length) {
+                uploadFiles(e.dataTransfer.files);
+            }
+        });
+
+        fileInput.addEventListener('change', () => {
+            if (fileInput.files.length) {
+                uploadFiles(fileInput.files);
+            }
+        });
+
+        // Upload files
+        async function uploadFiles(files) {
+            const expiryHours = parseInt(fileExpiry.value);
+
+            uploadProgress.classList.remove('hidden');
+            progressFill.style.width = '0%';
+            progressText.textContent = 'Uploading...';
+
+            for (let i = 0; i < files.length; i++) {
+                const file = files[i];
+                const formData = new FormData();
+                formData.append('file', file);
+                formData.append('expiry_hours', expiryHours);
+
+                try {
+                    const xhr = new XMLHttpRequest();
+
+                    xhr.upload.addEventListener('progress', (e) => {
+                        if (e.lengthComputable) {
+                            const percent = Math.round((e.loaded / e.total) * 100);
+                            progressFill.style.width = percent + '%';
+                            progressText.textContent = `Uploading ${file.name}... ${percent}%`;
+                        }
+                    });
+
+                    await new Promise((resolve, reject) => {
+                        xhr.addEventListener('load', () => {
+                            if (xhr.status === 200) {
+                                resolve(JSON.parse(xhr.responseText));
+                            } else {
+                                reject(new Error('Upload failed'));
+                            }
+                        });
+                        xhr.addEventListener('error', reject);
+                        xhr.open('POST', '/napkins/upload');
+                        xhr.send(formData);
+                    });
+
+                    showToast(`Uploaded: ${file.name}`, 'success');
+                } catch (error) {
+                    showToast(`Failed: ${file.name}`, 'error');
+                }
+            }
+
+            uploadProgress.classList.add('hidden');
+            fileInput.value = '';
+            refreshItems();
+        }
+
+        // Text form submit
+        textForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            const content = textContent.value.trim();
+            if (!content) {
+                showToast('Please enter some text', 'error');
+                return;
+            }
+
+            try {
+                const response = await fetch('/napkins/text', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        content: content,
+                        title: textTitle.value.trim(),
+                        expiry_hours: parseInt(textExpiry.value)
+                    })
+                });
+
+                if (response.ok) {
+                    showToast('Text saved!', 'success');
+                    textContent.value = '';
+                    textTitle.value = '';
+                    refreshItems();
+                } else {
+                    throw new Error('Failed to save');
+                }
+            } catch (error) {
+                showToast('Failed to save text', 'error');
+            }
+        });
+
+        // Refresh items list
+        async function refreshItems() {
+            try {
+                const response = await fetch('/napkins/api/items');
+                const data = await response.json();
+
+                if (data.items.length === 0) {
+                    itemsList.innerHTML = `
+                        <div class="text-center text-gray-500 py-8">
+                            <i data-lucide="inbox" class="w-12 h-12 mx-auto mb-2 opacity-50"></i>
+                            <p>No temporary items yet</p>
+                        </div>
+                    `;
+                    lucide.createIcons();
+                    return;
+                }
+
+                itemsList.innerHTML = data.items.map(item => {
+                    const icon = item.type === 'file' ? 'file' : 'file-text';
+                    const iconColor = item.type === 'file' ? 'text-gray-400' : 'text-blue-400';
+                    const expiresIn = formatTimeRemaining(item.expires_at);
+                    const expiringSoon = isExpiringSoon(item.expires_at);
+
+                    return `
+                        <div class="bg-gray-700 rounded-lg p-4 border border-gray-600 mb-3">
+                            <div class="flex items-start justify-between gap-3">
+                                <div class="flex items-start gap-3 flex-1 min-w-0">
+                                    <i data-lucide="${icon}" class="w-5 h-5 ${iconColor} mt-0.5 flex-shrink-0"></i>
+                                    <div class="flex-1 min-w-0">
+                                        <div class="text-gray-100 font-medium truncate">${escapeHtml(item.name)}</div>
+                                        <div class="text-xs text-gray-400 mt-1 flex items-center gap-3 flex-wrap">
+                                            <span>${formatSize(item.size_bytes)}</span>
+                                            <span class="flex items-center gap-1 ${expiringSoon ? 'text-orange-400' : ''}">
+                                                <i data-lucide="clock" class="w-3 h-3"></i>
+                                                ${expiresIn}
+                                            </span>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="flex gap-1 flex-shrink-0">
+                                    ${item.type === 'file'
+                                        ? `<a href="/napkins/download/${item.id}" class="p-1.5 hover:bg-gray-600 rounded" title="Download">
+                                            <i data-lucide="download" class="w-4 h-4 text-gray-300"></i>
+                                        </a>`
+                                        : `<button onclick="viewText('${item.id}')" class="p-1.5 hover:bg-gray-600 rounded" title="View">
+                                            <i data-lucide="eye" class="w-4 h-4 text-gray-300"></i>
+                                        </button>
+                                        <button onclick="copyText('${item.id}')" class="p-1.5 hover:bg-gray-600 rounded" title="Copy">
+                                            <i data-lucide="copy" class="w-4 h-4 text-gray-300"></i>
+                                        </button>`
+                                    }
+                                    <button onclick="copyLink('${item.id}', '${item.type}')" class="p-1.5 hover:bg-gray-600 rounded" title="Copy Link">
+                                        <i data-lucide="link" class="w-4 h-4 text-gray-300"></i>
+                                    </button>
+                                    <button onclick="deleteItem('${item.id}')" class="p-1.5 hover:bg-gray-600 rounded" title="Delete">
+                                        <i data-lucide="trash-2" class="w-4 h-4 text-red-400"></i>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+
+                lucide.createIcons();
+            } catch (error) {
+                showToast('Failed to load items', 'error');
+            }
+        }
+
+        // Escape HTML
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        // View text
+        function viewText(id) {
+            window.open(`/napkins/view/${id}`, '_blank');
+        }
+
+        // Copy link to clipboard
+        function copyLink(id, type) {
+            const url = window.location.origin + (type === 'file' ? '/napkins/download/' : '/napkins/view/') + id;
+            navigator.clipboard.writeText(url).then(() => {
+                showToast('Link copied!', 'success');
+            }).catch(() => {
+                showToast('Failed to copy', 'error');
+            });
+        }
+
+        // Copy text content
+        async function copyText(id) {
+            try {
+                const response = await fetch('/napkins/raw/' + id);
+                const text = await response.text();
+                await navigator.clipboard.writeText(text);
+                showToast('Copied to clipboard!', 'success');
+            } catch (error) {
+                showToast('Failed to copy', 'error');
+            }
+        }
+
+        // Delete item
+        async function deleteItem(id) {
+            if (!confirm('Delete this item?')) return;
+
+            try {
+                const response = await fetch('/napkins/delete/' + id, { method: 'DELETE' });
+                if (response.ok) {
+                    showToast('Deleted!', 'success');
+                    refreshItems();
+                } else {
+                    throw new Error('Delete failed');
+                }
+            } catch (error) {
+                showToast('Failed to delete', 'error');
+            }
+        }
+
+        // Initial load and auto-refresh
+        refreshItems();
+        setInterval(refreshItems, 30000);
+    </script>
+</body>
+</html>

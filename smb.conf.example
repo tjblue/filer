@@ -1,0 +1,50 @@
+[global]
+   # Network Performance
+   socket options = TCP_NODELAY IPTOS_LOWDELAY SO_RCVBUF=524288 SO_SNDBUF=524288
+   read raw = yes
+   write raw = yes
+   max xmit = 65535
+   dead time = 15
+   getwd cache = yes
+
+   # Use modern SMB3 protocol (faster, secure)
+   min protocol = SMB2
+   max protocol = SMB3
+
+   # Disable unnecessary features for speed
+   strict allocate = yes
+   allocation roundup size = 4096
+
+   # Logging
+   log level = 1
+   log file = /var/log/samba/%m.log
+   max log size = 50
+
+   # Security (adjust as needed)
+   workgroup = WORKGROUP
+   server string = Filer Fast Server
+   security = user
+   map to guest = Bad User
+
+[filer]
+   path = /path/to/your/filer/root
+   browseable = yes
+   writable = yes
+   guest ok = yes
+   read only = no
+
+   # Performance settings for the share
+   create mask = 0644
+   directory mask = 0755
+   force user = nobody
+
+   # Critical performance options
+   strict locking = no
+   oplocks = yes
+   level2 oplocks = yes
+   kernel oplocks = yes
+
+   # Disable features that slow down transfers
+   vfs objects =
+   aio read size = 16384
+   aio write size = 16384

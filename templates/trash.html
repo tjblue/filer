@@ -1,0 +1,334 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Trash - Filer</title>
+    <script>
+        (function() {
+            var t = localStorage.getItem('filer-theme');
+            var f = localStorage.getItem('filer-fontSize');
+            if (t && t !== 'dark') document.documentElement.classList.add('theme-' + t);
+            if (f && f !== 'medium') document.documentElement.classList.add('font-' + f);
+        })();
+    </script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <link rel="stylesheet" href="/_static/style.css">
+</head>
+<body class="bg-gray-900 min-h-screen">
+    <div class="max-w-6xl mx-auto p-4">
+        <!-- Header -->
+        <div class="bg-gray-800 rounded-lg shadow-sm border border-gray-700 p-4 mb-4">
+            <div class="flex items-center justify-between gap-4">
+                <div class="flex items-center gap-3">
+                    <a href="/" class="p-2 hover:bg-gray-700 rounded" title="Back to Files">
+                        <i data-lucide="arrow-left" class="w-5 h-5 text-gray-300"></i>
+                    </a>
+                    <h1 class="text-xl font-semibold text-gray-100 flex items-center gap-2">
+                        <i data-lucide="trash-2" class="w-6 h-6 text-gray-400"></i>
+                        Trash
+                        <span id="trashItemCount" class="text-sm font-normal text-gray-400"></span>
+                    </h1>
+                </div>
+                <div class="flex items-center gap-2">
+                    <button onclick="restoreSelectedFromTrash()" id="restoreBtn" disabled class="px-3 py-1.5 bg-green-600 text-white text-sm rounded hover:bg-green-700 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1">
+                        <i data-lucide="undo-2" class="w-4 h-4"></i> Restore
+                    </button>
+                    <button onclick="permanentDeleteFromTrash()" id="permanentDeleteBtn" disabled class="px-3 py-1.5 bg-red-600 text-white text-sm rounded hover:bg-red-700 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1">
+                        <i data-lucide="trash-2" class="w-4 h-4"></i> Delete Forever
+                    </button>
+                    <button onclick="emptyTrash()" id="emptyTrashBtn" class="px-3 py-1.5 bg-gray-700 text-gray-200 text-sm rounded hover:bg-gray-600 flex items-center gap-1">
+                        <i data-lucide="trash" class="w-4 h-4"></i> Empty Trash
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Trash List -->
+        <div class="bg-gray-800 rounded-lg shadow-sm border border-gray-700 overflow-hidden">
+            <table class="w-full">
+                <thead class="border-b border-gray-700" style="background-color: rgb(42 48 60);">
+                    <tr>
+                        <th class="w-10 p-3">
+                            <input type="checkbox" id="selectAllTrash" onchange="toggleSelectAllTrash()" class="rounded bg-gray-700 border-gray-600">
+                        </th>
+                        <th class="text-left p-3 text-sm font-medium text-gray-300">Name</th>
+                        <th class="text-left p-3 text-sm font-medium text-gray-300 w-48">Original Location</th>
+                        <th class="text-left p-3 text-sm font-medium text-gray-300 w-24">Size</th>
+                        <th class="text-left p-3 text-sm font-medium text-gray-300 w-36">Auto-deletes in</th>
+                    </tr>
+                </thead>
+                <tbody id="trashList">
+                </tbody>
+            </table>
+            <div id="trashEmptyState" class="hidden p-8 text-center text-gray-400">
+                <i data-lucide="trash-2" class="w-12 h-12 mx-auto mb-2 opacity-50"></i>
+                <p>Trash is empty</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Confirmation Modal -->
+    <div id="confirmModal" class="fixed inset-0 hidden z-50 flex items-center justify-center">
+        <div class="modal-backdrop absolute inset-0" onclick="closeConfirmModal(false)"></div>
+        <div class="relative bg-gray-800 border border-gray-700 rounded-lg shadow-xl p-6 w-96">
+            <h2 id="confirmTitle" class="font-medium text-gray-100 mb-2">Confirm Action</h2>
+            <p id="confirmMessage" class="text-gray-300 text-sm mb-4"></p>
+            <div class="flex gap-2 justify-end">
+                <button onclick="closeConfirmModal(false)" class="px-4 py-2 bg-gray-700 text-gray-200 text-sm rounded hover:bg-gray-600">Cancel</button>
+                <button id="confirmButton" onclick="closeConfirmModal(true)" class="px-4 py-2 bg-red-600 text-white text-sm rounded hover:bg-red-700">
+                    <span id="confirmButtonText">Delete</span>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast -->
+    <div id="toast" class="toast-container fixed bottom-4 right-4 z-50">
+        <div class="toast-inner flex items-center gap-2.5 px-4 py-3 rounded-lg shadow-lg border bg-gray-800 border-gray-700 text-sm">
+            <span id="toastIcon" class="flex-shrink-0"></span>
+            <span id="toastMessage" class="text-gray-100"></span>
+        </div>
+    </div>
+
+    <script>
+    // State
+    let trashItems = [];
+    let selectedTrashItems = new Set();
+
+    // Initialize
+    document.addEventListener('DOMContentLoaded', () => {
+        lucide.createIcons();
+        loadTrash();
+    });
+
+    // API helper
+    async function api(endpoint, options = {}) {
+        const response = await fetch(endpoint, options);
+        if (!response.ok) {
+            const error = await response.json().catch(() => ({ error: response.statusText }));
+            throw new Error(error.error || error.message || 'Request failed');
+        }
+        return response.json();
+    }
+
+    // File icon helper
+    function getFileIcon(name) {
+        const ext = name.split('.').pop().toLowerCase();
+        const icons = {
+            'js': 'file-code', 'ts': 'file-code', 'py': 'file-code', 'java': 'file-code',
+            'html': 'file-code', 'css': 'file-code', 'json': 'file-json',
+            'md': 'file-text', 'txt': 'file-text', 'log': 'file-text',
+            'jpg': 'image', 'jpeg': 'image', 'png': 'image', 'gif': 'image', 'svg': 'image',
+            'pdf': 'file-type', 'doc': 'file-text', 'docx': 'file-text',
+            'zip': 'file-archive', 'tar': 'file-archive', 'gz': 'file-archive',
+        };
+        return icons[ext] || 'file';
+    }
+
+    function escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+
+    // Toast
+    let toastTimeout = null;
+    const toastIcons = {
+        success: '<i data-lucide="check-circle" class="w-4 h-4 text-green-400"></i>',
+        error:   '<i data-lucide="alert-circle" class="w-4 h-4 text-red-400"></i>',
+        info:    '<i data-lucide="info" class="w-4 h-4 text-blue-400"></i>'
+    };
+
+    function showToast(message, type = 'info') {
+        const container = document.getElementById('toast');
+        const inner = container.querySelector('.toast-inner');
+        document.getElementById('toastIcon').innerHTML = toastIcons[type] || toastIcons.info;
+        document.getElementById('toastMessage').textContent = message;
+        inner.classList.remove('toast-accent-success', 'toast-accent-error', 'toast-accent-info');
+        inner.classList.add('toast-accent-' + type);
+        container.classList.add('toast-visible');
+        lucide.createIcons();
+        if (toastTimeout) clearTimeout(toastTimeout);
+        toastTimeout = setTimeout(() => container.classList.remove('toast-visible'), 4000);
+    }
+
+    // Confirmation dialog
+    let confirmResolve = null;
+
+    function showConfirmDialog(options) {
+        return new Promise((resolve) => {
+            confirmResolve = resolve;
+            document.getElementById('confirmTitle').textContent = options.title || 'Confirm Action';
+            document.getElementById('confirmMessage').textContent = options.message || 'Are you sure?';
+            const confirmBtn = document.getElementById('confirmButton');
+            const btnClass = options.confirmClass || 'bg-red-600 hover:bg-red-700';
+            document.getElementById('confirmButtonText').textContent = options.confirmText || 'Confirm';
+            confirmBtn.className = `px-4 py-2 text-white text-sm rounded ${btnClass}`;
+            document.getElementById('confirmModal').classList.remove('hidden');
+            setTimeout(() => confirmBtn.focus(), 100);
+        });
+    }
+
+    function closeConfirmModal(confirmed) {
+        document.getElementById('confirmModal').classList.add('hidden');
+        if (confirmResolve) { confirmResolve(confirmed); confirmResolve = null; }
+    }
+
+    // Trash operations
+    async function loadTrash() {
+        try {
+            const data = await api('/api/trash/items');
+            trashItems = data.items;
+            selectedTrashItems.clear();
+            renderTrashView();
+        } catch (err) {
+            showToast(err.message, 'error');
+        }
+    }
+
+    function renderTrashView() {
+        const tbody = document.getElementById('trashList');
+        const emptyState = document.getElementById('trashEmptyState');
+        const countSpan = document.getElementById('trashItemCount');
+
+        countSpan.textContent = trashItems.length > 0 ? `(${trashItems.length} items)` : '';
+
+        if (trashItems.length === 0) {
+            tbody.innerHTML = '';
+            emptyState.classList.remove('hidden');
+            document.getElementById('emptyTrashBtn').disabled = true;
+            return;
+        }
+
+        emptyState.classList.add('hidden');
+        document.getElementById('emptyTrashBtn').disabled = false;
+
+        tbody.innerHTML = trashItems.map(item => {
+            const icon = item.is_directory ? 'folder' : getFileIcon(item.name);
+            const iconColor = item.is_directory ? 'text-yellow-500' : 'text-gray-400';
+            const selected = selectedTrashItems.has(item.trash_id) ? 'selected' : '';
+            const expiredClass = item.is_expired ? 'text-red-400' : 'text-gray-400';
+
+            const pathParts = item.original_path.split('/');
+            pathParts.pop();
+            const parentPath = pathParts.join('/') || 'Root';
+
+            return `
+                <tr class="file-row border-b border-gray-700 ${selected}" data-trash-id="${item.trash_id}">
+                    <td class="p-3">
+                        <input type="checkbox" class="trash-checkbox rounded bg-gray-700 border-gray-600" data-trash-id="${item.trash_id}"
+                               ${selected ? 'checked' : ''} onchange="toggleTrashSelect('${item.trash_id}')">
+                    </td>
+                    <td class="p-3">
+                        <div class="flex items-center gap-2">
+                            <i data-lucide="${icon}" class="w-5 h-5 ${iconColor}"></i>
+                            <span class="text-gray-100">${escapeHtml(item.name)}</span>
+                        </div>
+                    </td>
+                    <td class="p-3 text-sm text-gray-400 truncate" title="${escapeHtml(item.original_path)}">${escapeHtml(parentPath)}</td>
+                    <td class="p-3 text-sm text-gray-400">${item.size_formatted}</td>
+                    <td class="p-3 text-sm ${expiredClass}">${item.time_remaining}</td>
+                </tr>
+            `;
+        }).join('');
+
+        lucide.createIcons();
+        updateTrashToolbar();
+    }
+
+    function toggleTrashSelect(trashId) {
+        if (selectedTrashItems.has(trashId)) {
+            selectedTrashItems.delete(trashId);
+        } else {
+            selectedTrashItems.add(trashId);
+        }
+        renderTrashView();
+    }
+
+    function toggleSelectAllTrash() {
+        const selectAll = document.getElementById('selectAllTrash');
+        if (selectAll.checked) {
+            trashItems.forEach(item => selectedTrashItems.add(item.trash_id));
+        } else {
+            selectedTrashItems.clear();
+        }
+        renderTrashView();
+    }
+
+    function updateTrashToolbar() {
+        const hasSelection = selectedTrashItems.size > 0;
+        document.getElementById('restoreBtn').disabled = !hasSelection;
+        document.getElementById('permanentDeleteBtn').disabled = !hasSelection;
+        document.getElementById('selectAllTrash').checked = selectedTrashItems.size === trashItems.length && trashItems.length > 0;
+    }
+
+    async function restoreSelectedFromTrash() {
+        if (selectedTrashItems.size === 0) return;
+        try {
+            const result = await api('/api/trash/restore', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ ids: Array.from(selectedTrashItems) })
+            });
+            if (result.restored.length > 0) showToast(`Restored ${result.restored.length} item(s)`, 'success');
+            if (result.errors.length > 0) showToast(`Failed to restore ${result.errors.length} item(s): ${result.errors[0].error}`, 'error');
+            await loadTrash();
+        } catch (err) {
+            showToast(err.message, 'error');
+        }
+    }
+
+    async function permanentDeleteFromTrash() {
+        if (selectedTrashItems.size === 0) return;
+        const confirmed = await showConfirmDialog({
+            title: 'Permanently Delete',
+            message: `Permanently delete ${selectedTrashItems.size} item(s)? This cannot be undone.`,
+            confirmText: 'Delete Forever',
+            confirmClass: 'bg-orange-600 hover:bg-orange-700'
+        });
+        if (!confirmed) return;
+        try {
+            const result = await api('/api/trash/delete', {
+                method: 'DELETE',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ ids: Array.from(selectedTrashItems) })
+            });
+            if (result.deleted.length > 0) showToast(`Permanently deleted ${result.deleted.length} item(s)`, 'success');
+            if (result.errors.length > 0) showToast(`Failed to delete ${result.errors.length} item(s)`, 'error');
+            await loadTrash();
+        } catch (err) {
+            showToast(err.message, 'error');
+        }
+    }
+
+    async function emptyTrash() {
+        if (trashItems.length === 0) return;
+        const confirmed = await showConfirmDialog({
+            title: 'Empty Trash',
+            message: `Empty trash? All ${trashItems.length} item(s) will be permanently deleted. This cannot be undone.`,
+            confirmText: 'Empty Trash',
+            confirmClass: 'bg-orange-600 hover:bg-orange-700'
+        });
+        if (!confirmed) return;
+        try {
+            const result = await api('/api/trash/empty', { method: 'DELETE' });
+            showToast(`Trash emptied (${result.deleted_count} items removed)`, 'success');
+            await loadTrash();
+        } catch (err) {
+            showToast(err.message, 'error');
+        }
+    }
+
+    // Keyboard shortcuts
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+            if (!document.getElementById('confirmModal').classList.contains('hidden')) {
+                closeConfirmModal(false);
+            }
+        }
+    });
+    </script>
+</body>
+</html>
