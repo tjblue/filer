@@ -17,7 +17,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Filer - A simple file server')
     parser.add_argument('--root', '-r', default='.', help='Root directory to serve (default: current directory)')
     parser.add_argument('--port', '-p', type=int, default=5000, help='Port to run on (default: 5000)')
-    parser.add_argument('--host', '-H', default='127.0.0.1', help='Host to bind to (default: 127.0.0.1)')
+    parser.add_argument('--host', '-H', default='0.0.0.0', help='Host to bind to (default: 127.0.0.1)')
     args = parser.parse_args()
 
     ROOT_DIR = Path(args.root).resolve()
