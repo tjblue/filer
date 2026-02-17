@@ -3,15 +3,19 @@ Filer HTTP routes - file management operations.
 """
 
 import os
+import re
 import shutil
+import uuid
 import zipfile
 import io
+import threading
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timedelta
 from flask import Blueprint, render_template, request, jsonify, send_file, abort, current_app, Response
 from werkzeug.utils import secure_filename
 
 from app.utils import safe_path, get_file_info
+from app.config import CHUNK_SIZE, MAX_FILE_SIZE_MB
 from app.filer.search import search_with_ripgrep, search_with_python
 from app.trash.service import trash_move_to_trash
 
@@ -248,6 +252,179 @@ def upload_files():
             errors.append({'name': filename, 'error': 'Permission denied'})
 
     return jsonify({'uploaded': uploaded, 'errors': errors})
+
+
+# Registry of active chunked uploads: upload_id -> { path, size, lock }
+_active_uploads = {}
+_uploads_lock = threading.Lock()
+
+_UUID_RE = re.compile(r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$')
+
+
+def _cleanup_stale_uploads():
+    """Remove upload entries and partial files older than 24 hours."""
+    cutoff = datetime.now() - timedelta(hours=24)
+    with _uploads_lock:
+        stale = []
+        for uid, info in _active_uploads.items():
+            try:
+                mtime = datetime.fromtimestamp(info['path'].stat().st_mtime)
+                if mtime < cutoff:
+                    stale.append(uid)
+            except OSError:
+                stale.append(uid)
+        for uid in stale:
+            info = _active_uploads.pop(uid)
+            try:
+                info['path'].unlink(missing_ok=True)
+            except OSError:
+                pass
+
+
+@bp.route('/api/upload/init', methods=['POST'])
+def upload_init():
+    """Initialize a chunked upload — pre-allocates the destination file."""
+    ROOT_DIR = current_app.config['ROOT_DIR']
+    data = request.get_json()
+    file_name = data.get('fileName', '').strip()
+    file_size = data.get('fileSize', 0)
+    dest_path = data.get('destPath', '')
+
+    if not file_name:
+        abort(400, 'Missing fileName')
+
+    # Sanitize filename
+    file_name = os.path.basename(file_name)
+    if not file_name or '..' in file_name:
+        abort(400, 'Invalid filename')
+
+    # Validate destination
+    parent = safe_path(dest_path)
+    if not parent.is_dir():
+        abort(400, 'Invalid upload directory')
+
+    # Enforce file size limit
+    max_bytes = MAX_FILE_SIZE_MB * 1024 * 1024
+    if file_size > max_bytes:
+        abort(413, f'File too large. Maximum size is {MAX_FILE_SIZE_MB} MB')
+
+    _cleanup_stale_uploads()
+
+    upload_id = str(uuid.uuid4())
+    dest = parent / file_name
+
+    # Pre-allocate the file
+    try:
+        with open(str(dest), 'wb') as f:
+            f.seek(file_size - 1)
+            f.write(b'\0')
+    except OSError as e:
+        abort(500, f'Failed to create file: {e}')
+
+    with _uploads_lock:
+        _active_uploads[upload_id] = {
+            'path': dest,
+            'size': file_size,
+            'lock': threading.Lock(),
+        }
+
+    return jsonify({
+        'uploadId': upload_id,
+        'chunkSize': CHUNK_SIZE
+    })
+
+
+@bp.route('/api/upload/chunk', methods=['POST'])
+def upload_chunk():
+    """Write a chunk directly into the destination file at the correct offset."""
+    upload_id = request.form.get('uploadId', '')
+    chunk_index = request.form.get('chunkIndex', '')
+
+    if not _UUID_RE.match(upload_id):
+        abort(400, 'Invalid uploadId')
+
+    try:
+        chunk_idx = int(chunk_index)
+        if chunk_idx < 0:
+            raise ValueError
+    except (ValueError, TypeError):
+        abort(400, 'Invalid chunkIndex')
+
+    with _uploads_lock:
+        info = _active_uploads.get(upload_id)
+    if not info:
+        abort(404, 'Upload session not found')
+
+    chunk_file = request.files.get('chunk')
+    if not chunk_file:
+        abort(400, 'No chunk data')
+
+    data = chunk_file.read()
+    offset = chunk_idx * CHUNK_SIZE
+
+    with info['lock']:
+        try:
+            with open(str(info['path']), 'r+b') as f:
+                f.seek(offset)
+                f.write(data)
+        except OSError as e:
+            abort(500, f'Failed to write chunk: {e}')
+
+    return jsonify({
+        'uploadId': upload_id,
+        'chunkIndex': chunk_idx,
+        'received': True
+    })
+
+
+@bp.route('/api/upload/complete', methods=['POST'])
+def upload_complete():
+    """Finalize a chunked upload — file is already assembled."""
+    ROOT_DIR = current_app.config['ROOT_DIR']
+    data = request.get_json()
+    upload_id = data.get('uploadId', '')
+
+    if not _UUID_RE.match(upload_id):
+        abort(400, 'Invalid uploadId')
+
+    with _uploads_lock:
+        info = _active_uploads.pop(upload_id, None)
+    if not info:
+        abort(404, 'Upload session not found')
+
+    # Verify final size
+    try:
+        actual = info['path'].stat().st_size
+        if actual != info['size']:
+            abort(500, f'Size mismatch: expected {info["size"]}, got {actual}')
+    except OSError as e:
+        abort(500, f'Failed to verify file: {e}')
+
+    rel_path = str(info['path'].relative_to(ROOT_DIR)).replace('\\', '/')
+    return jsonify({
+        'success': True,
+        'path': rel_path
+    })
+
+
+@bp.route('/api/upload/cancel', methods=['POST'])
+def upload_cancel():
+    """Cancel an in-progress chunked upload and delete the partial file."""
+    data = request.get_json()
+    upload_id = data.get('uploadId', '')
+
+    if not _UUID_RE.match(upload_id):
+        abort(400, 'Invalid uploadId')
+
+    with _uploads_lock:
+        info = _active_uploads.pop(upload_id, None)
+    if info:
+        try:
+            info['path'].unlink(missing_ok=True)
+        except OSError:
+            pass
+
+    return jsonify({'success': True})
 
 
 @bp.route('/api/zip')

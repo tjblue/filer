@@ -301,6 +301,23 @@
         </div>
     </div>
 
+    <!-- Upload Progress Box (bottom-right, non-blocking) -->
+    <div id="uploadProgressBox" class="fixed bottom-4 right-72 hidden z-50 bg-gray-800 border border-gray-700 rounded-lg shadow-xl p-4 w-80">
+        <div class="flex items-center justify-between mb-2">
+            <span class="text-sm font-medium text-gray-100 truncate pr-2" id="uploadFileName" title="">Uploading...</span>
+            <button onclick="cancelActiveUpload()" class="p-1 hover:bg-gray-700 rounded text-gray-400 hover:text-red-400 flex-shrink-0" title="Cancel upload">
+                <i data-lucide="x" class="w-4 h-4"></i>
+            </button>
+        </div>
+        <div class="w-full bg-gray-700 rounded-full h-2 mb-2 overflow-hidden">
+            <div id="uploadProgressBar" class="bg-green-500 h-2 rounded-full transition-all duration-200" style="width: 0%"></div>
+        </div>
+        <div class="flex items-center justify-between text-xs text-gray-400">
+            <span><span id="uploadProgressPercent">0%</span> &middot; <span id="uploadSpeed">0 B/s</span></span>
+            <span id="uploadProgressSize">0 B / 0 B</span>
+        </div>
+    </div>
+
     <!-- Toast -->
     <div id="toast" class="toast-container fixed bottom-4 right-4 z-50">
         <div class="toast-inner flex items-center gap-2.5 px-4 py-3 rounded-lg shadow-lg border bg-gray-800 border-gray-700 text-sm">

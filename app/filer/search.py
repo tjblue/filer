@@ -20,7 +20,7 @@ def search_with_ripgrep(query: str, search_path: Path, max_results: int) -> list
             [
                 'rg', '--json', '-i',         # JSON output, case-insensitive
                 '--max-count', '3',           # Max 3 matches per file
-                '--max-filesize', '1M',       # Skip files over 1MB
+                '--max-filesize', '10M',      # Skip files over 10MB
                 '-g', '!.*',                  # Skip hidden files
                 query, str(search_path)
             ],
@@ -118,7 +118,7 @@ def search_with_python(query: str, search_path: Path, max_results: int) -> list:
     ROOT_DIR = current_app.config['ROOT_DIR']
     results = []
     query_lower = query.lower()
-    max_file_size = 1024 * 1024
+    max_file_size = 10 * 1024 * 1024
 
     binary_extensions = {'.pdf', '.jpg', '.jpeg', '.png', '.gif', '.bmp', '.ico', '.svg',
                          '.zip', '.tar', '.gz', '.rar', '.7z', '.exe', '.dll', '.so',

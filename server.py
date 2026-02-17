@@ -39,6 +39,6 @@ if __name__ == '__main__':
 
     print(f"Serving files from: {ROOT_DIR}")
     print(f"Server running at: http://{args.host}:{args.port}")
-    print(f"Quick Transfer available at: http://{args.host}:{args.port}/qt/")
+    print(f"Napkins available at: http://{args.host}:{args.port}/napkins/")
 
     app.run(host=args.host, port=args.port, debug=True)

@@ -1112,26 +1112,303 @@ async function createNewItem() {
     }
 }
 
+// ============== Upload Progress ==============
+
+const CHUNK_SIZE = 5 * 1024 * 1024; // 5 MB - must match server config
+const PARALLEL_CHUNKS = 3;
+let activeUploader = null;
+
+function showUploadProgress(fileName) {
+    const box = document.getElementById('uploadProgressBox');
+    const nameEl = document.getElementById('uploadFileName');
+    nameEl.textContent = fileName;
+    nameEl.title = fileName;
+    document.getElementById('uploadProgressBar').style.width = '0%';
+    document.getElementById('uploadProgressPercent').textContent = '0%';
+    document.getElementById('uploadProgressSize').textContent = '0 B / 0 B';
+    document.getElementById('uploadSpeed').textContent = '0 B/s';
+    box.classList.remove('hidden');
+    lucide.createIcons();
+}
+
+function hideUploadProgress() {
+    document.getElementById('uploadProgressBox').classList.add('hidden');
+}
+
+function updateUploadProgress(percent, speed, uploaded, total) {
+    document.getElementById('uploadProgressBar').style.width = percent + '%';
+    document.getElementById('uploadProgressPercent').textContent = Math.round(percent) + '%';
+    document.getElementById('uploadProgressSize').textContent = formatBytes(uploaded) + ' / ' + (total ? formatBytes(total) : '?');
+    document.getElementById('uploadSpeed').textContent = formatSpeed(speed);
+}
+
+function cancelActiveUpload() {
+    if (activeUploader) {
+        activeUploader.cancel();
+    }
+}
+
+class ChunkedUploader {
+    constructor(files, destPath) {
+        // files: array of { file: File, destPath: string }
+        this.files = files;
+        this.destPath = destPath;
+        this.cancelled = false;
+        this.activeXHRs = new Set();
+        this.currentUploadId = null;
+        this.totalBytes = files.reduce((sum, f) => sum + f.file.size, 0);
+        this.uploadedBytes = 0; // bytes fully uploaded across completed files
+        this.chunkProgress = new Map(); // chunk index -> bytes loaded
+        this.lastTime = performance.now();
+        this.lastBytes = 0;
+        this.speed = 0;
+    }
+
+    async start() {
+        if (activeUploader) {
+            showToast('An upload is already in progress', 'error');
+            return;
+        }
+        activeUploader = this;
+
+        const totalLabel = this.files.length === 1
+            ? this.files[0].file.name
+            : `${this.files.length} files`;
+        showUploadProgress(totalLabel);
+
+        try {
+            for (let i = 0; i < this.files.length; i++) {
+                if (this.cancelled) break;
+                const { file, destPath } = this.files[i];
+
+                // Update label for current file
+                const label = this.files.length === 1
+                    ? file.name
+                    : `${file.name} (${i + 1}/${this.files.length})`;
+                document.getElementById('uploadFileName').textContent = label;
+                document.getElementById('uploadFileName').title = label;
+
+                this.chunkProgress = new Map();
+
+                if (file.size < CHUNK_SIZE) {
+                    await this._uploadSmall(file, destPath);
+                } else {
+                    await this._uploadChunked(file, destPath);
+                }
+
+                this.uploadedBytes += file.size;
+            }
+
+            if (!this.cancelled) {
+                showToast(`Uploaded ${this.files.length} file(s)`, 'success');
+                refreshFiles();
+            }
+        } catch (err) {
+            if (!this.cancelled) {
+                showToast('Upload failed: ' + err.message, 'error');
+            }
+        } finally {
+            hideUploadProgress();
+            activeUploader = null;
+            this.currentUploadId = null;
+        }
+    }
+
+    _updateProgress() {
+        const currentFileUploaded = [...this.chunkProgress.values()].reduce((a, b) => a + b, 0);
+        const totalUploaded = this.uploadedBytes + currentFileUploaded;
+        const percent = this.totalBytes ? (totalUploaded / this.totalBytes) * 100 : 0;
+
+        const now = performance.now();
+        const elapsed = (now - this.lastTime) / 1000;
+        if (elapsed >= 0.2) {
+            this.speed = (totalUploaded - this.lastBytes) / elapsed;
+            this.lastBytes = totalUploaded;
+            this.lastTime = now;
+        }
+
+        updateUploadProgress(percent, this.speed, totalUploaded, this.totalBytes);
+    }
+
+    async _uploadSmall(file, destPath) {
+        return new Promise((resolve, reject) => {
+            const xhr = new XMLHttpRequest();
+            this.activeXHRs.add(xhr);
+
+            xhr.upload.addEventListener('progress', (e) => {
+                if (e.lengthComputable) {
+                    this.chunkProgress.set('small', e.loaded);
+                    this._updateProgress();
+                }
+            });
+
+            xhr.addEventListener('load', () => {
+                this.activeXHRs.delete(xhr);
+                if (xhr.status >= 200 && xhr.status < 300) {
+                    this.chunkProgress.set('small', file.size);
+                    resolve();
+                } else {
+                    reject(new Error(`Upload failed (${xhr.status})`));
+                }
+            });
+
+            xhr.addEventListener('error', () => {
+                this.activeXHRs.delete(xhr);
+                reject(new Error('Network error'));
+            });
+
+            xhr.addEventListener('abort', () => {
+                this.activeXHRs.delete(xhr);
+                reject(new Error('Upload cancelled'));
+            });
+
+            const formData = new FormData();
+            formData.append('path', destPath);
+            formData.append('files', file);
+
+            xhr.open('POST', '/api/upload');
+            xhr.send(formData);
+        });
+    }
+
+    async _uploadChunked(file, destPath) {
+        // Init
+        const initResp = await fetch('/api/upload/init', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                fileName: file.name,
+                fileSize: file.size,
+                destPath: destPath
+            })
+        });
+        if (!initResp.ok) {
+            const err = await initResp.json().catch(() => ({}));
+            throw new Error(err.error || `Init failed (${initResp.status})`);
+        }
+        const { uploadId } = await initResp.json();
+        this.currentUploadId = uploadId;
+
+        // Build chunk descriptors
+        const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
+        const chunks = [];
+        for (let i = 0; i < totalChunks; i++) {
+            const start = i * CHUNK_SIZE;
+            chunks.push({ index: i, start, end: Math.min(start + CHUNK_SIZE, file.size) });
+        }
+
+        // Shared queue index for workers
+        let nextChunk = 0;
+        const self = this;
+
+        async function worker() {
+            while (!self.cancelled) {
+                const ci = nextChunk++;
+                if (ci >= chunks.length) break;
+                await self._sendChunk(uploadId, file, chunks[ci]);
+            }
+        }
+
+        // Launch parallel workers
+        const workers = [];
+        for (let w = 0; w < Math.min(PARALLEL_CHUNKS, totalChunks); w++) {
+            workers.push(worker());
+        }
+        await Promise.all(workers);
+
+        if (this.cancelled) return;
+
+        // Complete
+        const completeResp = await fetch('/api/upload/complete', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                uploadId: uploadId,
+                fileName: file.name,
+                destPath: destPath
+            })
+        });
+        if (!completeResp.ok) {
+            const err = await completeResp.json().catch(() => ({}));
+            throw new Error(err.error || `Complete failed (${completeResp.status})`);
+        }
+        this.currentUploadId = null;
+    }
+
+    _sendChunk(uploadId, file, { index, start, end }) {
+        return new Promise((resolve, reject) => {
+            const xhr = new XMLHttpRequest();
+            this.activeXHRs.add(xhr);
+
+            xhr.upload.addEventListener('progress', (e) => {
+                if (e.lengthComputable) {
+                    this.chunkProgress.set(index, e.loaded);
+                    this._updateProgress();
+                }
+            });
+
+            xhr.addEventListener('load', () => {
+                this.activeXHRs.delete(xhr);
+                if (xhr.status >= 200 && xhr.status < 300) {
+                    this.chunkProgress.set(index, end - start);
+                    this._updateProgress();
+                    resolve();
+                } else {
+                    reject(new Error(`Chunk upload failed (${xhr.status})`));
+                }
+            });
+
+            xhr.addEventListener('error', () => {
+                this.activeXHRs.delete(xhr);
+                reject(new Error('Network error'));
+            });
+
+            xhr.addEventListener('abort', () => {
+                this.activeXHRs.delete(xhr);
+                reject(new Error('Upload cancelled'));
+            });
+
+            const blob = file.slice(start, end);
+            const formData = new FormData();
+            formData.append('uploadId', uploadId);
+            formData.append('chunkIndex', index);
+            formData.append('chunk', blob);
+
+            xhr.open('POST', '/api/upload/chunk');
+            xhr.send(formData);
+        });
+    }
+
+    cancel() {
+        this.cancelled = true;
+        for (const xhr of this.activeXHRs) {
+            xhr.abort();
+        }
+        this.activeXHRs.clear();
+        // Cancel server-side if we have an active chunked upload
+        if (this.currentUploadId) {
+            fetch('/api/upload/cancel', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ uploadId: this.currentUploadId })
+            }).catch(() => {});
+            this.currentUploadId = null;
+        }
+        showToast('Upload cancelled', 'info');
+    }
+}
+
 // Upload
 async function uploadFiles(fileList) {
     if (!fileList.length) return;
 
-    const formData = new FormData();
-    formData.append('path', currentPath);
-    for (const file of fileList) {
-        formData.append('files', file);
-    }
+    const files = Array.from(fileList).map(file => ({
+        file,
+        destPath: currentPath
+    }));
 
-    try {
-        const result = await api('/api/upload', {
-            method: 'POST',
-            body: formData
-        });
-        showToast(`Uploaded ${result.uploaded.length} file(s)`, 'success');
-        refreshFiles();
-    } catch (err) {
-        showToast(err.message, 'error');
-    }
+    const uploader = new ChunkedUploader(files, currentPath);
+    await uploader.start();
 
     document.getElementById('uploadInput').value = '';
 }
@@ -1543,6 +1820,11 @@ document.addEventListener('keydown', (e) => {
             closeConfirmModal(false);
             return;
         }
+        // Cancel active upload
+        if (activeUploader) {
+            cancelActiveUpload();
+            return;
+        }
         // Cancel active download
         if (activeDownloader) {
             cancelActiveDownload();
@@ -1643,10 +1925,10 @@ document.addEventListener('drop', async (e) => {
     await uploadDroppedFiles(files);
 });
 
-async function uploadDroppedFiles(files) {
+async function uploadDroppedFiles(droppedFiles) {
     // Collect all directories that need to be created
     const dirs = new Set();
-    files.forEach(f => {
+    droppedFiles.forEach(f => {
         const parts = f.path.split('/');
         parts.pop(); // Remove filename
         let dirPath = '';
@@ -1678,29 +1960,15 @@ async function uploadDroppedFiles(files) {
         }
     }
 
-    // Upload files one by one to correct directories
-    let uploadedCount = 0;
-    for (const { file, path } of files) {
+    // Build file list with correct destination paths
+    const uploadFileList = droppedFiles.map(({ file, path }) => {
         const targetDir = path.includes('/') ? path.substring(0, path.lastIndexOf('/')) : '';
-        const targetPath = currentPath ? (targetDir ? `${currentPath}/${targetDir}` : currentPath) : targetDir;
+        const destPath = currentPath ? (targetDir ? `${currentPath}/${targetDir}` : currentPath) : targetDir;
+        return { file, destPath };
+    });
 
-        const fileFormData = new FormData();
-        fileFormData.append('path', targetPath);
-        fileFormData.append('files', file);
-
-        try {
-            await api('/api/upload', {
-                method: 'POST',
-                body: fileFormData
-            });
-            uploadedCount++;
-        } catch (e) {
-            console.error('Upload failed:', file.name, e);
-        }
-    }
-
-    showToast(`Uploaded ${uploadedCount} file(s)`, 'success');
-    refreshFiles();
+    const uploader = new ChunkedUploader(uploadFileList, currentPath);
+    await uploader.start();
 }
 
 // Enter key for search
