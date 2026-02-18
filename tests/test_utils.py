@@ -1,4 +1,4 @@
-"""Tests for app.utils — safe_path() and get_file_info()."""
+"""Tests for app.utils - safe_path() and get_file_info()."""
 
 import pytest
 from app.utils import safe_path, get_file_info
