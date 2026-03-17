@@ -20,6 +20,65 @@ const PREVIEW_SIZES = {
     lg: { thumb: 96, icon: 56 }
 };
 
+// Mobile grid view
+let mobileViewMode = 'grid'; // 'grid' or 'list' (mobile only)
+let photoMode = false; // Photo Mode (mobile only)
+let currentImageIndex = 0;
+let currentFolderImages = [];
+
+// Check if mobile
+function isMobile() {
+    return window.innerWidth < 640;
+}
+
+// Toggle mobile view mode (grid/list)
+function toggleMobileViewMode() {
+    mobileViewMode = localStorage.getItem('filer-mobileView') || 'grid';
+    mobileViewMode = mobileViewMode === 'grid' ? 'list' : 'grid';
+    localStorage.setItem('filer-mobileView', mobileViewMode);
+    updateViewToggleIcon();
+    renderFiles();
+}
+
+// Update view toggle icon
+function updateViewToggleIcon() {
+    const icon = document.getElementById('viewToggleIcon');
+    if (icon) {
+        icon.setAttribute('data-lucide', mobileViewMode === 'grid' ? 'list' : 'layout-grid');
+        lucide.createIcons();
+    }
+}
+
+// Toggle Photo Mode
+function togglePhotoMode() {
+    photoMode = !photoMode;
+    localStorage.setItem('filer-photoMode', photoMode ? 'true' : 'false');
+    updatePhotoModeIcon();
+    renderFiles();
+}
+
+// Update Photo Mode icon
+function updatePhotoModeIcon() {
+    const icon = document.getElementById('photoModeIcon');
+    if (icon) {
+        icon.setAttribute('data-lucide', photoMode ? 'images' : 'images');
+        // Add visual indicator - could add a different color via CSS
+        icon.parentElement.classList.toggle('bg-blue-600', photoMode);
+        icon.parentElement.classList.toggle('hover:bg-blue-700', photoMode);
+        lucide.createIcons();
+    }
+}
+
+// Initialize mobile view mode
+function initMobileViewMode() {
+    mobileViewMode = localStorage.getItem('filer-mobileView') || 'grid';
+    // Default photoMode to true on mobile, unless explicitly disabled
+    const savedPhotoMode = localStorage.getItem('filer-photoMode');
+    photoMode = savedPhotoMode === null ? isMobile() : savedPhotoMode === 'true';
+    updateViewToggleIcon();
+    updatePhotoModeIcon();
+}
+
 // Wait for CodeMirror to load
 function waitForCodeMirror(callback, maxAttempts = 20) {
     if (window.CodeMirror) {
@@ -39,6 +98,19 @@ document.addEventListener('DOMContentLoaded', () => {
         initializeFromUrl();
         setupTabSupport();
     });
+});
+
+// Fix for Safari back button bfcache issue
+window.addEventListener('pageshow', (event) => {
+    // If page is loaded from bfcache, reinitialize from URL
+    if (event.persisted) {
+        initializeFromUrl();
+    }
+});
+
+// Prevent bfcache issues by adding unload handler
+window.addEventListener('unload', () => {
+    // Clean up state
 });
 
 // Enable Tab key in the editor
@@ -219,7 +291,8 @@ function scrollToLine(lineNum) {
 
 // Initialize view from current URL
 async function initializeFromUrl() {
-    const path = window.location.pathname.replace(/^\/+|\/+$/g, '');
+    // Decode the URL path first (handles spaces like %20 -> space)
+    const path = decodeURIComponent(window.location.pathname.replace(/^\/+|\/+$/g, ''));
     const urlParams = new URLSearchParams(window.location.search);
     const searchQuery = urlParams.get('q');
 
@@ -237,7 +310,8 @@ async function initializeFromUrl() {
 
 // Handle browser back/forward buttons
 window.addEventListener('popstate', async (e) => {
-    const path = window.location.pathname.replace(/^\/+|\/+$/g, '');
+    // Decode the URL path first (handles spaces like %20 -> space)
+    const path = decodeURIComponent(window.location.pathname.replace(/^\/+|\/+$/g, ''));
     const urlParams = new URLSearchParams(window.location.search);
     const searchQuery = urlParams.get('q');
 
@@ -283,7 +357,7 @@ async function navigateTo(path, pushHistory = true) {
         sortColumn = null;
         sortAscending = true;
 
-        const newUrl = '/' + (currentPath || '');
+        const newUrl = '/' + encodeURIComponent(currentPath || '');
         if (pushHistory && window.location.pathname !== newUrl) {
             history.pushState({ path: currentPath, type: 'dir' }, '', newUrl);
         }
@@ -624,6 +698,10 @@ function getSortedFiles() {
         } else if (sortColumn === 'modified') {
             aVal = new Date(a.modified).getTime();
             bVal = new Date(b.modified).getTime();
+        } else if (sortColumn === 'date_taken') {
+            // Use exif_date if available, fallback to modified
+            aVal = a.exif_date ? new Date(a.exif_date).getTime() : new Date(a.modified).getTime();
+            bVal = b.exif_date ? new Date(b.exif_date).getTime() : new Date(b.modified).getTime();
         }
 
         if (aVal === bVal) return 0;
@@ -656,7 +734,173 @@ function updateSortIndicators() {
     }
 }
 
-// Render file list
+// Render grid view (mobile)
+function renderGridView() {
+    const tbody = document.getElementById('fileList');
+    
+    // Photo Mode: filter non-images and sort by date_taken
+    let sortedFiles = getSortedFiles();
+    if (photoMode) {
+        // Filter to only images and folders
+        sortedFiles = sortedFiles.filter(f => f.isDirectory || isImage(f.name));
+        
+        // Default sort to date_taken_newest in Photo Mode
+        if (sortColumn !== 'name' && sortColumn !== 'size' && sortColumn !== 'modified') {
+            sortColumn = 'date_taken';
+            sortAscending = false; // Newest first
+        }
+        sortedFiles = getSortedFiles();
+        
+        // Render grid with group headers
+        renderGridViewWithGroups(sortedFiles);
+        return;
+    }
+
+    const previewScale = localStorage.getItem('filer-previewScale') || 'off';
+    const sizes = PREVIEW_SIZES[previewScale] || { thumb: 40, icon: 28 };
+
+    // Get current folder images for swipe navigation
+    currentFolderImages = sortedFiles.filter(f => !f.isDirectory && isImage(f.name)).map(f => f.path);
+
+    tbody.innerHTML = `
+        <tr>
+            <td colspan="5" class="p-0">
+                <div class="file-grid">
+                    ${sortedFiles.map((file, index) => {
+                        const icon = file.isDirectory ? 'folder' : getFileIcon(file.name);
+                        const iconColor = file.isDirectory ? 'text-yellow-500' : 'text-gray-400';
+                        const selected = selectedFiles.has(file.path) ? 'selected' : '';
+
+                        return `
+                            <div class="file-grid-cell ${selected}" data-path="${file.path}" 
+                                 onclick="handleGridClick('${file.path}', ${file.isDirectory}, ${index})"
+                                 oncontextmenu="handleRightClick(event, '${file.path}')">
+                                ${!file.isDirectory && isImage(file.name) ? `
+                                    <div class="file-grid-thumb" data-image-index="${index}">
+                                        <img src="/api/thumb?path=${encodeURIComponent(file.path)}&size=70" 
+                                             loading="lazy" alt="" onerror="this.parentElement.innerHTML='<i class=\\'${iconColor}\\' data-lucide=\\'${icon}\\'></i>'">
+                                    </div>
+                                ` : `
+                                    <div class="file-grid-thumb">
+                                        <i data-lucide="${icon}" class="${iconColor} w-6 h-6"></i>
+                                    </div>
+                                `}
+                                <span class="file-grid-name" title="${file.name}">${file.name}</span>
+                            </div>
+                        `;
+                    }).join('')}
+                </div>
+            </td>
+        </tr>
+    `;
+
+    lucide.createIcons();
+}
+
+// Render grid view with month/year group headers (Photo Mode)
+function renderGridViewWithGroups(sortedFiles) {
+    const tbody = document.getElementById('fileList');
+    
+    // Get current folder images for swipe navigation
+    currentFolderImages = sortedFiles.filter(f => !f.isDirectory && isImage(f.name)).map(f => f.path);
+
+    // Group files by month/year
+    const groups = {};
+    sortedFiles.forEach(file => {
+        let groupKey;
+        
+        if (file.isDirectory) {
+            groupKey = '__folders__';
+        } else {
+            const date = file.exif_date ? new Date(file.exif_date) : new Date(file.modified);
+            groupKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+        }
+        
+        if (!groups[groupKey]) {
+            groups[groupKey] = [];
+        }
+        groups[groupKey].push(file);
+    });
+
+    // Build HTML with group headers
+    let html = '<tr><td colspan="5" class="p-0">';
+    
+    // First add folders (if any)
+    if (groups['__folders__']) {
+        html += renderGridGroup(groups['__folders__'], null);
+        delete groups['__folders__'];
+    }
+    
+    // Then add month groups in order (newest first)
+    const sortedKeys = Object.keys(groups).sort((a, b) => b.localeCompare(a));
+    
+    sortedKeys.forEach(groupKey => {
+        const [year, month] = groupKey.split('-');
+        const monthNames = ['January', 'February', 'March', 'April', 'May', 'June',
+                           'July', 'August', 'September', 'October', 'November', 'December'];
+        const headerText = `${monthNames[parseInt(month) - 1]} ${year}`;
+        
+        html += `<div class="gallery-group-header-grid">${headerText}</div>`;
+        html += renderGridGroup(groups[groupKey], sortedFiles);
+    });
+
+    html += '</td></tr>';
+    tbody.innerHTML = html;
+    lucide.createIcons();
+}
+
+// Render a group of files in grid format
+function renderGridGroup(files, allFiles) {
+    let html = '<div class="file-grid">';
+    
+    files.forEach((file, index) => {
+        const icon = file.isDirectory ? 'folder' : getFileIcon(file.name);
+        const iconColor = file.isDirectory ? 'text-yellow-500' : 'text-gray-400';
+        const selected = selectedFiles.has(file.path) ? 'selected' : '';
+        
+        // Find the actual index in the full sorted list for swipe navigation
+        const actualIndex = allFiles ? allFiles.indexOf(file) : index;
+        
+        html += `
+            <div class="file-grid-cell ${selected}" data-path="${file.path}" 
+                 onclick="handleGridClick('${file.path}', ${file.isDirectory}, ${actualIndex})"
+                 oncontextmenu="handleRightClick(event, '${file.path}')">
+                ${!file.isDirectory && isImage(file.name) ? `
+                    <div class="file-grid-thumb" data-image-index="${actualIndex}">
+                        <img src="/api/thumb?path=${encodeURIComponent(file.path)}&size=70" 
+                             loading="lazy" alt="" onerror="this.parentElement.innerHTML='<i class=\\'${iconColor}\\' data-lucide=\\'${icon}\\'></i>'">
+                    </div>
+                ` : `
+                    <div class="file-grid-thumb">
+                        <i data-lucide="${icon}" class="${iconColor} w-6 h-6"></i>
+                    </div>
+                `}
+                <span class="file-grid-name" title="${file.name}">${file.name}</span>
+            </div>
+        `;
+    });
+    
+    html += '</div>';
+    return html;
+}
+
+// Handle grid cell click
+function handleGridClick(path, isDirectory, index) {
+    if (selectedFiles.size > 0) {
+        toggleSelect(path);
+        return;
+    }
+
+    if (isDirectory) {
+        navigateTo(path);
+    } else if (isImage(path)) {
+        openImageViewer(index);
+    } else {
+        viewFile(path);
+    }
+}
+
+// Render file list (or grid on mobile)
 function renderFiles() {
     const tbody = document.getElementById('fileList');
     const emptyState = document.getElementById('emptyState');
@@ -671,7 +915,29 @@ function renderFiles() {
 
     emptyState.classList.add('hidden');
 
-    const sortedFiles = getSortedFiles();
+    // Check if mobile and grid view
+    if (isMobile() && mobileViewMode === 'grid') {
+        renderGridView();
+        return;
+    }
+
+    // Photo Mode: filter non-images and sort by date_taken
+    let sortedFiles = getSortedFiles();
+    if (photoMode && isMobile()) {
+        // Filter to only images and folders (folders at top)
+        sortedFiles = sortedFiles.filter(f => f.isDirectory || isImage(f.name));
+        
+        // Default sort to date_taken_newest in Photo Mode (if not already sorted)
+        if (sortColumn !== 'name' && sortColumn !== 'size' && sortColumn !== 'modified') {
+            sortColumn = 'date_taken';
+            sortAscending = false; // Newest first
+        }
+        sortedFiles = getSortedFiles();
+        
+        // Render with grouping
+        renderFilesWithGroups(sortedFiles);
+        return;
+    }
 
     const previewScale = localStorage.getItem('filer-previewScale') || 'off';
     const sizes = PREVIEW_SIZES[previewScale];
@@ -687,7 +953,7 @@ function renderFiles() {
         if (previewScale === 'off' || !sizes) {
             iconHtml = `<i data-lucide="${icon}" class="w-5 h-5 ${iconColor}"></i>`;
         } else if (!file.isDirectory && isImage(file.name)) {
-            iconHtml = `<img src="/api/view?path=${encodeURIComponent(file.path)}" loading="lazy" style="width:${sizes.thumb}px;height:${sizes.thumb}px;" class="object-cover rounded flex-shrink-0">`;
+            iconHtml = `<img src="/api/thumb?path=${encodeURIComponent(file.path)}&size=${sizes.thumb}" loading="lazy" style="width:${sizes.thumb}px;height:${sizes.thumb}px;" class="object-cover rounded flex-shrink-0">`;
         } else if (!file.isDirectory && isPdf(file.name)) {
             const scale = sizes.thumb / 400;
             iconHtml = `<div class="pdf-thumb" style="width:${sizes.thumb}px;height:${sizes.thumb}px;"><iframe src="/api/view?path=${encodeURIComponent(file.path)}#toolbar=0&navpanes=0&scrollbar=0" loading="lazy" style="transform:scale(${scale});"></iframe></div>`;
@@ -731,6 +997,120 @@ function renderFiles() {
     }).join('');
 
     lucide.createIcons();
+}
+
+// Render files with month/year group headers (Photo Mode)
+function renderFilesWithGroups(sortedFiles) {
+    const tbody = document.getElementById('fileList');
+    const previewScale = localStorage.getItem('filer-previewScale') || 'off';
+    const sizes = PREVIEW_SIZES[previewScale];
+
+    // Group files by month/year
+    const groups = {};
+    let currentGroup = null;
+    
+    sortedFiles.forEach(file => {
+        let groupKey;
+        
+        if (file.isDirectory) {
+            groupKey = '__folders__'; // Folders at top
+        } else {
+            // Get date for grouping
+            const date = file.exif_date ? new Date(file.exif_date) : new Date(file.modified);
+            groupKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`; // e.g., "2026-02"
+        }
+        
+        if (!groups[groupKey]) {
+            groups[groupKey] = [];
+        }
+        groups[groupKey].push(file);
+    });
+
+    // Build HTML with group headers
+    let html = '';
+    
+    // First add folders (if any)
+    if (groups['__folders__']) {
+        groups['__folders__'].forEach(file => {
+            html += renderFileRow(file, sizes);
+        });
+        delete groups['__folders__'];
+    }
+    
+    // Then add month groups in order
+    const sortedKeys = Object.keys(groups).sort((a, b) => b.localeCompare(a)); // Newest first
+    
+    sortedKeys.forEach(groupKey => {
+        const [year, month] = groupKey.split('-');
+        const monthNames = ['January', 'February', 'March', 'April', 'May', 'June',
+                           'July', 'August', 'September', 'October', 'November', 'December'];
+        const headerText = `${monthNames[parseInt(month) - 1]} ${year}`;
+        
+        html += `<tr class="gallery-group-header"><td colspan="5" class="px-3 py-2 text-sm font-semibold text-gray-300 bg-gray-800">${headerText}</td></tr>`;
+        
+        groups[groupKey].forEach(file => {
+            html += renderFileRow(file, sizes);
+        });
+    });
+
+    tbody.innerHTML = html;
+    lucide.createIcons();
+}
+
+// Render a single file row (extracted for reuse in grouped view)
+function renderFileRow(file, sizes) {
+    const icon = file.isDirectory ? 'folder' : getFileIcon(file.name);
+    const iconColor = file.isDirectory ? 'text-yellow-500' : 'text-gray-400';
+    const size = file.isDirectory ? '-' : formatSize(file.size);
+    const modified = formatDate(file.modified);
+    const selected = selectedFiles.has(file.path) ? 'selected' : '';
+    const previewScale = localStorage.getItem('filer-previewScale') || 'off';
+
+    let iconHtml;
+    if (previewScale === 'off' || !sizes) {
+        iconHtml = `<i data-lucide="${icon}" class="w-5 h-5 ${iconColor}"></i>`;
+    } else if (!file.isDirectory && isImage(file.name)) {
+        iconHtml = `<img src="/api/thumb?path=${encodeURIComponent(file.path)}&size=${sizes.thumb}" loading="lazy" style="width:${sizes.thumb}px;height:${sizes.thumb}px;" class="object-cover rounded flex-shrink-0">`;
+    } else if (!file.isDirectory && isPdf(file.name)) {
+        const scale = sizes.thumb / 400;
+        iconHtml = `<div class="pdf-thumb" style="width:${sizes.thumb}px;height:${sizes.thumb}px;"><iframe src="/api/view?path=${encodeURIComponent(file.path)}#toolbar=0&navpanes=0&scrollbar=0" loading="lazy" style="transform:scale(${scale});"></iframe></div>`;
+    } else {
+        iconHtml = `<i data-lucide="${icon}" class="${iconColor}" style="width:${sizes.icon}px;height:${sizes.icon}px;"></i>`;
+    }
+
+    return `
+        <tr class="file-row border-b border-gray-700 ${selected}" data-path="${file.path}">
+            <td class="p-3">
+                <input type="checkbox" class="file-checkbox rounded bg-gray-700 border-gray-600" data-path="${file.path}"
+                       ${selected ? 'checked' : ''} onchange="toggleSelect('${file.path}')">
+            </td>
+            <td class="p-3">
+                <div class="flex items-center gap-2 cursor-pointer" onclick="handleClick('${file.path}', ${file.isDirectory})">
+                    ${iconHtml}
+                    <span class="text-gray-100 hover:text-blue-400">${file.name}</span>
+                </div>
+            </td>
+            <td class="p-3 text-sm text-gray-400">${size}</td>
+            <td class="p-3 text-sm text-gray-400">${modified}</td>
+            <td class="p-3">
+                <div class="flex gap-1 justify-end">
+                    ${!file.isDirectory ? `
+                        <button onclick="event.stopPropagation(); downloadFile('${file.path}')" class="p-1.5 hover:bg-gray-700 rounded" title="Download">
+                            <i data-lucide="download" class="w-4 h-4 text-gray-400"></i>
+                        </button>
+                    ` : `
+                        <span class="p-1.5 w-8"></span>
+                    `}
+                    <button onclick="event.stopPropagation(); showRenameModal('${file.path}', '${file.name}')" class="p-1.5 hover:bg-gray-700 rounded" title="Rename">
+                        <i data-lucide="pen-line" class="w-4 h-4 text-gray-400"></i>
+                    </button>
+                    <button onclick="event.stopPropagation(); deleteSingle('${file.path}')" class="p-1.5 hover:bg-gray-700 rounded" title="Delete">
+                        <i data-lucide="trash-2" class="w-4 h-4 text-red-400"></i>
+                    </button>
+                </div>
+            </td>
+        </tr>
+    `;
 }
 
 // Get file icon based on extension
@@ -833,6 +1213,26 @@ function toggleMoreMenu() {
 function closeMoreMenu() {
     document.getElementById('moreMenu').classList.add('hidden');
 }
+
+// Mobile menu toggle
+function toggleMobileMenu() {
+    const menu = document.getElementById('mobileMenu');
+    menu.classList.toggle('open');
+    if (menu.classList.contains('open')) {
+        lucide.createIcons();
+    }
+}
+
+// Close mobile menu when clicking backdrop
+document.addEventListener('click', (e) => {
+    const mobileMenu = document.getElementById('mobileMenu');
+    const mobileBtn = document.getElementById('mobileActionsBtn');
+    if (mobileMenu && mobileMenu.classList.contains('open') && 
+        !mobileMenu.contains(e.target) && 
+        !mobileBtn.contains(e.target)) {
+        mobileMenu.classList.remove('open');
+    }
+});
 
 // Close more menu when clicking outside
 document.addEventListener('click', (e) => {
@@ -2024,4 +2424,147 @@ function closeConfirmModal(confirmed) {
 }
 
 // Close confirmation modal on Escape (handled in main keyboard shortcuts section below)
+
+// ===== Full Screen Image Viewer (Mobile) =====
+
+// Open image viewer at index
+function openImageViewer(index) {
+    if (currentFolderImages.length === 0) return;
+    
+    currentImageIndex = index;
+    const modal = document.getElementById('imageViewerModal');
+    const img = document.getElementById('imageViewerImg');
+    const counter = document.getElementById('imageViewerCounter');
+    const nav = document.getElementById('imageViewerNav');
+    
+    // Load image
+    img.src = `/api/view?path=${encodeURIComponent(currentFolderImages[currentImageIndex])}`;
+    
+    // Update counter
+    counter.textContent = `${currentImageIndex + 1} / ${currentFolderImages.length}`;
+    
+    // Show/hide nav buttons
+    nav.classList.toggle('hidden', currentFolderImages.length <= 1);
+    
+    // Show modal
+    modal.classList.remove('hidden');
+    
+    // Initialize swipe detection
+    initSwipeDetection();
+    
+    lucide.createIcons();
+}
+
+// Close image viewer
+function closeImageViewer() {
+    document.getElementById('imageViewerModal').classList.add('hidden');
+    document.getElementById('imageViewerImg').src = '';
+}
+
+// Show previous image
+function showPrevImage(event) {
+    if (event) event.stopPropagation();
+    if (currentFolderImages.length === 0) return;
+    
+    currentImageIndex = (currentImageIndex - 1 + currentFolderImages.length) % currentFolderImages.length;
+    updateImageViewer();
+}
+
+// Show next image
+function showNextImage(event) {
+    if (event) event.stopPropagation();
+    if (currentFolderImages.length === 0) return;
+    
+    currentImageIndex = (currentImageIndex + 1) % currentFolderImages.length;
+    updateImageViewer();
+}
+
+// Update image viewer content
+function updateImageViewer() {
+    const img = document.getElementById('imageViewerImg');
+    const counter = document.getElementById('imageViewerCounter');
+    const nav = document.getElementById('imageViewerNav');
+    
+    img.src = `/api/view?path=${encodeURIComponent(currentFolderImages[currentImageIndex])}`;
+    counter.textContent = `${currentImageIndex + 1} / ${currentFolderImages.length}`;
+    nav.classList.toggle('hidden', currentFolderImages.length <= 1);
+}
+
+// Handle image viewer click (close on background click)
+function handleImageViewerClick(event) {
+    if (event.target.id === 'imageViewerContent' || event.target.id === 'imageViewerImg') {
+        closeImageViewer();
+    }
+}
+
+// Swipe detection variables
+let touchStartX = 0;
+let touchStartY = 0;
+let touchEndX = 0;
+let touchEndY = 0;
+let swipeContainer = null;
+
+// Initialize swipe detection
+function initSwipeDetection() {
+    const content = document.getElementById('imageViewerContent');
+    if (!content) return;
+    
+    content.addEventListener('touchstart', handleTouchStart, { passive: true });
+    content.addEventListener('touchend', handleTouchEnd, { passive: true });
+}
+
+// Handle touch start
+function handleTouchStart(e) {
+    touchStartX = e.changedTouches[0].screenX;
+    touchStartY = e.changedTouches[0].screenY;
+}
+
+// Handle touch end
+function handleTouchEnd(e) {
+    touchEndX = e.changedTouches[0].screenX;
+    touchEndY = e.changedTouches[0].screenY;
+    handleSwipe();
+}
+
+// Handle swipe gesture
+function handleSwipe() {
+    const deltaX = touchEndX - touchStartX;
+    const deltaY = touchEndY - touchStartY;
+    
+    // Check if horizontal swipe (more horizontal than vertical)
+    if (Math.abs(deltaX) > Math.abs(deltaY) && Math.abs(deltaX) > 50) {
+        if (deltaX > 0) {
+            // Swipe right - previous image
+            showPrevImage();
+        } else {
+            // Swipe left - next image
+            showNextImage();
+        }
+    }
+}
+
+// Close image viewer on Escape key
+document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+        const modal = document.getElementById('imageViewerModal');
+        if (!modal.classList.contains('hidden')) {
+            closeImageViewer();
+        }
+    }
+    
+    // Arrow key navigation in image viewer
+    const imageModal = document.getElementById('imageViewerModal');
+    if (!imageModal.classList.contains('hidden')) {
+        if (e.key === 'ArrowLeft') {
+            showPrevImage();
+        } else if (e.key === 'ArrowRight') {
+            showNextImage();
+        }
+    }
+});
+
+// Initialize mobile view mode on load
+document.addEventListener('DOMContentLoaded', () => {
+    initMobileViewMode();
+});
 

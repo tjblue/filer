@@ -249,3 +249,370 @@ html.theme-light .setting-btn.border-gray-600:hover { border-color: #9ca3af; }
 /* ===== Font Size ===== */
 html.font-sm { font-size: 13px; }
 html.font-lg { font-size: 18px; }
+
+/* ===== Mobile / iOS Optimizations ===== */
+html {
+    -webkit-overflow-scrolling: touch;
+    -webkit-tap-highlight-color: transparent;
+}
+
+body {
+    -webkit-overflow-scrolling: touch;
+}
+
+/* Touch-friendly button minimums */
+button, 
+.btn,
+[role="button"] {
+    min-height: 44px;
+    min-width: 44px;
+    touch-action: manipulation;
+}
+
+/* Mobile actions button - hidden by default, shown on mobile via media query */
+#mobileActionsBtn {
+    display: none;
+}
+
+/* Prevent text selection on buttons during tap */
+button, 
+.toolbar-btn,
+.file-row {
+    -webkit-user-select: none;
+    user-select: none;
+}
+
+/* Mobile-only utilities */
+@media (max-width: 639px) {
+    .hide-mobile { display: none !important; }
+    .show-mobile { display: flex !important; }
+    
+    /* Hide desktop toolbar on mobile */
+    #toolbar { display: none !important; }
+    #mobileActionsBtn { display: flex !important; }
+}
+
+@media (min-width: 640px) {
+    .hide-desktop { display: none !important; }
+    .show-desktop { display: flex !important; }
+    
+    /* Hide mobile button on desktop */
+    #mobileActionsBtn { display: none !important; }
+    #toolbar { display: flex !important; }
+}
+
+/* Mobile menu dropdown */
+.mobile-menu-wrapper,
+#mobileMenu {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.5);
+    z-index: 100;
+    display: none;
+    align-items: flex-end;
+    justify-content: center;
+}
+
+#mobileMenu.open {
+    display: flex;
+}
+
+.mobile-menu-sheet {
+    background: rgb(31 41 55);
+    border-top-left-radius: 1rem;
+    border-top-right-radius: 1rem;
+    padding: 1rem;
+    width: 100%;
+    max-width: 400px;
+    animation: slideUp 0.2s ease-out;
+}
+
+@keyframes slideUp {
+    from { transform: translateY(100%); }
+    to { transform: translateY(0); }
+}
+
+.mobile-menu-item {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.875rem 1rem;
+    color: rgb(229 231 235);
+    border-radius: 0.5rem;
+    width: 100%;
+    text-align: left;
+    background: transparent;
+    border: none;
+    font-size: 1rem;
+}
+
+.mobile-menu-item:hover {
+    background: rgb(55 65 81);
+}
+
+.mobile-menu-item.danger {
+    color: rgb(248 113 113);
+}
+
+html.theme-light .mobile-menu-sheet {
+    background: #ffffff;
+}
+
+html.theme-light .mobile-menu-item {
+    color: rgb(17 24 39);
+}
+
+html.theme-light .mobile-menu-item:hover {
+    background: rgb(243 244 246);
+}
+
+/* Mobile file list scroll */
+@media (max-width: 639px) {
+    .file-list-container {
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+    }
+    
+    .file-table {
+        min-width: 600px;
+    }
+}
+
+/* ===== Grid View (Mobile) ===== */
+.file-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(90px, 1fr));
+    gap: 8px;
+    padding: 8px;
+}
+
+.file-grid-cell {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 8px;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: background-color 0.15s;
+}
+
+.file-grid-cell:hover {
+    background-color: rgb(55 65 81);
+}
+
+.file-grid-cell.selected {
+    background-color: rgb(30 58 138);
+}
+
+.file-grid-thumb {
+    width: 70px;
+    height: 70px;
+    border-radius: 6px;
+    object-fit: cover;
+    background: rgb(55 65 81);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 6px;
+}
+
+.file-grid-thumb img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    border-radius: 6px;
+}
+
+.file-grid-name {
+    font-size: 11px;
+    color: rgb(229 231 235);
+    text-align: center;
+    max-width: 85px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    word-break: break-all;
+}
+
+html.theme-light .file-grid-cell:hover {
+    background-color: rgb(229 231 235);
+}
+
+html.theme-light .file-grid-cell.selected {
+    background-color: rgb(219 234 254);
+}
+
+html.theme-light .file-grid-thumb {
+    background: rgb(229 231 235);
+}
+
+html.theme-light .file-grid-name {
+    color: rgb(17 24 39);
+}
+
+/* ===== Full Screen Image Viewer (Mobile) ===== */
+.image-viewer-modal {
+    position: fixed;
+    inset: 0;
+    background: rgb(0 0 0);
+    z-index: 9999;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.image-viewer-modal.hidden {
+    display: none;
+}
+
+.image-viewer-content {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    touch-action: pan-y pinch-zoom;
+}
+
+.image-viewer-img {
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
+    animation: fadeIn 0.2s ease;
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+.image-viewer-close {
+    position: absolute;
+    top: 16px;
+    right: 16px;
+    z-index: 10000;
+    background: rgba(0 0 0 0.5);
+    border: none;
+    border-radius: 50%;
+    width: 44px;
+    height: 44px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    cursor: pointer;
+}
+
+.image-viewer-nav {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0 8px;
+}
+
+.image-viewer-nav-btn {
+    pointer-events: auto;
+    background: rgba(0 0 0 0.4);
+    border: none;
+    border-radius: 50%;
+    width: 48px;
+    height: 48px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    cursor: pointer;
+    opacity: 0.7;
+    transition: opacity 0.15s;
+}
+
+.image-viewer-nav-btn:hover {
+    opacity: 1;
+}
+
+.image-viewer-nav-btn:active {
+    background: rgba(0 0 0 0.6);
+}
+
+.image-viewer-counter {
+    position: absolute;
+    bottom: 24px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(0 0 0 0.6);
+    color: white;
+    padding: 6px 12px;
+    border-radius: 16px;
+    font-size: 13px;
+}
+
+/* View toggle button */
+#viewToggleBtn,
+#photoModeBtn {
+    display: none;
+}
+
+@media (max-width: 639px) {
+    #viewToggleBtn,
+    #photoModeBtn {
+        display: flex;
+    }
+}
+
+/* Photo Mode active state */
+#photoModeBtn .bg-blue-600 {
+    background-color: rgb(37 99 235);
+}
+
+#photoModeBtn .hover\:bg-blue-700:hover {
+    background-color: rgb(29 78 216);
+}
+
+/* Gallery group headers */
+.gallery-group-header td {
+    padding: 12px 16px 8px;
+    background-color: rgb(31 41 55);
+    border-bottom: 1px solid rgb(55 65 81);
+    position: sticky;
+    top: 0;
+    z-index: 10;
+}
+
+html.theme-light .gallery-group-header td {
+    background-color: rgb(249 250 251);
+    border-bottom-color: rgb(209 213 219);
+    color: rgb(17 24 39);
+}
+
+/* Mobile photo mode - hide size/modified columns */
+@media (max-width: 639px) {
+    .photo-mode-active .file-row td:nth-child(3),
+    .photo-mode-active .file-row td:nth-child(4),
+    .photo-mode-active thead th:nth-child(3),
+    .photo-mode-active thead th:nth-child(4) {
+        display: none;
+    }
+}
+
+/* Grid view group headers (Photo Mode) */
+.gallery-group-header-grid {
+    padding: 12px 12px 6px;
+    background-color: rgb(31 41 55);
+    font-size: 14px;
+    font-weight: 600;
+    color: rgb(229 231 235);
+    position: sticky;
+    top: 0;
+    z-index: 10;
+}
+
+html.theme-light .gallery-group-header-grid {
+    background-color: rgb(249 250 251);
+    color: rgb(17 24 39);
+}

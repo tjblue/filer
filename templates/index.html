@@ -2,7 +2,9 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <title>Filer</title>
     <script>
         (function() {
@@ -34,39 +36,52 @@
 <body class="bg-gray-900 min-h-screen">
     <div id="app" class="max-w-6xl mx-auto p-4">
         <!-- Header -->
-        <div class="bg-gray-800 rounded-lg shadow-sm border border-gray-700 p-4 mb-4">
-            <div class="flex items-center justify-between gap-4">
+        <div class="bg-gray-800 rounded-lg shadow-sm border border-gray-700 p-2 md:p-4 mb-4">
+            <div class="flex flex-col md:flex-row md:items-center justify-between gap-2 md:gap-4">
                 <div class="flex items-center gap-4 flex-wrap">
                     <h1 class="text-xl font-semibold text-gray-100 flex items-center gap-2">
                         <i data-lucide="folder-open" class="w-6 h-6 text-blue-400"></i>
                         Filer
                     </h1>
-                    <!-- Toolbar Pills -->
+                    <!-- Mobile Actions Button -->
+                    <button onclick="toggleMobileMenu()" id="mobileActionsBtn" class="px-3 py-2 bg-gray-700 text-gray-200 text-sm rounded-lg shadow hover:bg-gray-600 border border-gray-600 flex items-center gap-2">
+                        <i data-lucide="plus" class="w-5 h-5"></i> Actions
+                    </button>
+                    <!-- View Toggle (Mobile Only) -->
+                    <button onclick="toggleMobileViewMode()" id="viewToggleBtn" class="px-3 py-2 bg-gray-700 text-gray-200 text-sm rounded-lg shadow hover:bg-gray-600 border border-gray-600 flex items-center gap-2">
+                        <i id="viewToggleIcon" data-lucide="layout-grid" class="w-5 h-5"></i>
+                    </button>
+                    <!-- Photo Mode Toggle (Mobile Only) -->
+                    <button onclick="togglePhotoMode()" id="photoModeBtn" class="px-3 py-2 bg-gray-700 text-gray-200 text-sm rounded-lg shadow hover:bg-gray-600 border border-gray-600 flex items-center gap-2">
+                        <i id="photoModeIcon" data-lucide="images" class="w-5 h-5"></i>
+                    </button>
+
+                    <!-- Desktop Toolbar Pills -->
                 <div id="toolbar" class="flex flex-wrap items-center gap-2">
                     <button id="newFileBtn" onclick="showNewFileModal()" class="px-3 py-1.5 bg-gray-700 text-gray-200 text-sm rounded-full shadow hover:bg-gray-600 hover:shadow-lg transition-all duration-200 flex items-center gap-2 border border-gray-600">
-                        <i data-lucide="file-plus" class="w-4 h-4 text-blue-400"></i> New File
+                        <i data-lucide="file-plus" class="w-4 h-4 text-blue-400"></i> <span class="hidden sm:inline">New File</span>
                     </button>
                     <button id="newFolderBtn" onclick="showNewFolderModal()" class="px-3 py-1.5 bg-gray-700 text-gray-200 text-sm rounded-full shadow hover:bg-gray-600 hover:shadow-lg transition-all duration-200 flex items-center gap-2 border border-gray-600">
-                        <i data-lucide="folder-plus" class="w-4 h-4 text-yellow-400"></i> New Folder
+                        <i data-lucide="folder-plus" class="w-4 h-4 text-yellow-400"></i> <span class="hidden sm:inline">New Folder</span>
                     </button>
                     <button id="uploadBtn" onclick="document.getElementById('uploadInput').click()" class="px-3 py-1.5 bg-gray-700 text-gray-200 text-sm rounded-full shadow hover:bg-gray-600 hover:shadow-lg transition-all duration-200 flex items-center gap-2 border border-gray-600">
-                        <i data-lucide="upload" class="w-4 h-4 text-green-400"></i> Upload
+                        <i data-lucide="upload" class="w-4 h-4 text-green-400"></i> <span class="hidden sm:inline">Upload</span>
                     </button>
                     <input type="file" id="uploadInput" multiple class="hidden" onchange="uploadFiles(this.files)">
                     <!-- Selection actions (shown when files selected) -->
                     <button onclick="showMoveModal()" id="moveBtn" class="hidden px-3 py-1.5 bg-gray-700 text-gray-200 text-sm rounded-full shadow hover:bg-gray-600 hover:shadow-lg transition-all duration-200 items-center gap-2 border border-gray-600">
-                        <i data-lucide="move" class="w-4 h-4 text-purple-400"></i> Move
+                        <i data-lucide="move" class="w-4 h-4 text-purple-400"></i> <span class="hidden sm:inline">Move</span>
                     </button>
                     <button onclick="downloadSelectedAsZip()" id="zipBtn" class="hidden px-3 py-1.5 bg-gray-700 text-gray-200 text-sm rounded-full shadow hover:bg-gray-600 hover:shadow-lg transition-all duration-200 items-center gap-2 border border-gray-600">
-                        <i data-lucide="archive" class="w-4 h-4 text-blue-400"></i> Download .zip
+                        <i data-lucide="archive" class="w-4 h-4 text-blue-400"></i> <span class="hidden sm:inline">Download .zip</span>
                     </button>
                     <button onclick="deleteSelected()" id="deleteBtn" class="hidden px-3 py-1.5 bg-gray-700 text-gray-200 text-sm rounded-full shadow hover:bg-gray-600 hover:shadow-lg transition-all duration-200 items-center gap-2 border border-gray-600">
-                        <i data-lucide="trash-2" class="w-4 h-4 text-red-400"></i> Delete
+                        <i data-lucide="trash-2" class="w-4 h-4 text-red-400"></i> <span class="hidden sm:inline">Delete</span>
                     </button>
                     <!-- More menu (always last) -->
                     <div class="relative flex items-center">
                         <button onclick="toggleMoreMenu()" id="moreMenuBtn" class="px-3 py-1.5 bg-gray-700 text-gray-200 text-sm rounded-full shadow hover:bg-gray-600 hover:shadow-lg transition-all duration-200 flex items-center gap-2 border border-gray-600">
-                            <i data-lucide="chevron-down" class="w-4 h-4"></i> More
+                            <i data-lucide="chevron-down" class="w-4 h-4"></i> <span class="hidden sm:inline">More</span>
                         </button>
                         <div id="moreMenu" class="hidden absolute left-0 top-full mt-1 bg-gray-800 border border-gray-600 rounded-lg shadow-xl z-50 py-1 min-w-[160px]">
                             <a href="/napkins/" class="flex items-center gap-2 px-4 py-2 text-sm text-gray-200 hover:bg-gray-700 no-underline">
@@ -83,13 +98,13 @@
                 </div>
                 </div>
                 <!-- Search Bar -->
-                <div class="flex items-center gap-2">
-                    <div class="relative">
+                <div class="flex items-center gap-2 w-full md:w-auto">
+                    <div class="relative flex-1 md:w-64">
                         <input type="text" id="searchInput" placeholder="Search files..."
-                               class="pl-9 pr-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-sm w-64 outline-none focus:border-blue-500 text-gray-100 placeholder-gray-400">
+                               class="pl-9 pr-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-sm w-full outline-none focus:border-blue-500 text-gray-100 placeholder-gray-400">
                         <i data-lucide="search" class="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2"></i>
                     </div>
-                    <button onclick="performSearch()" class="px-3 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700">
+                    <button onclick="performSearch()" class="px-3 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 whitespace-nowrap">
                         Search
                     </button>
                 </div>
@@ -316,6 +331,56 @@
             <span><span id="uploadProgressPercent">0%</span> &middot; <span id="uploadSpeed">0 B/s</span></span>
             <span id="uploadProgressSize">0 B / 0 B</span>
         </div>
+    </div>
+
+    <!-- Mobile Menu Modal -->
+    <div id="mobileMenu" class="mobile-menu-wrapper">
+        <div class="mobile-menu-sheet">
+            <div class="flex justify-between items-center mb-2 px-1">
+                <span class="text-gray-400 text-sm">Actions</span>
+                <button onclick="toggleMobileMenu()" class="p-2 -mr-2">
+                    <i data-lucide="x" class="w-5 h-5 text-gray-400"></i>
+                </button>
+            </div>
+            <button onclick="toggleMobileMenu(); showNewFileModal()" class="mobile-menu-item">
+                <i data-lucide="file-plus" class="w-5 h-5 text-blue-400"></i> New File
+            </button>
+            <button onclick="toggleMobileMenu(); showNewFolderModal()" class="mobile-menu-item">
+                <i data-lucide="folder-plus" class="w-5 h-5 text-yellow-400"></i> New Folder
+            </button>
+            <button onclick="toggleMobileMenu(); document.getElementById('uploadInput').click()" class="mobile-menu-item">
+                <i data-lucide="upload" class="w-5 h-5 text-green-400"></i> Upload
+            </button>
+            <hr class="border-gray-700 my-2">
+            <a href="/napkins/" class="mobile-menu-item no-underline">
+                <i data-lucide="shredder" class="w-5 h-5 text-blue-400"></i> Napkins
+            </a>
+            <a href="/trash/" class="mobile-menu-item no-underline">
+                <i data-lucide="trash-2" class="w-5 h-5 text-gray-400"></i> Trash
+            </a>
+            <a href="/settings/" class="mobile-menu-item no-underline">
+                <i data-lucide="settings" class="w-5 h-5 text-gray-400"></i> Settings
+            </a>
+        </div>
+    </div>
+
+    <!-- Full Screen Image Viewer (Mobile) -->
+    <div id="imageViewerModal" class="image-viewer-modal hidden">
+        <button onclick="closeImageViewer()" class="image-viewer-close">
+            <i data-lucide="x" class="w-7 h-7"></i>
+        </button>
+        <div id="imageViewerContent" class="image-viewer-content" onclick="handleImageViewerClick(event)">
+            <img id="imageViewerImg" src="" alt="" class="image-viewer-img">
+        </div>
+        <div id="imageViewerNav" class="image-viewer-nav hidden">
+            <button onclick="showPrevImage(event)" class="image-viewer-nav-btn image-viewer-nav-prev">
+                <i data-lucide="chevron-left" class="w-8 h-8"></i>
+            </button>
+            <button onclick="showNextImage(event)" class="image-viewer-nav-btn image-viewer-nav-next">
+                <i data-lucide="chevron-right" class="w-8 h-8"></i>
+            </button>
+        </div>
+        <div id="imageViewerCounter" class="image-viewer-counter"></div>
     </div>
 
     <!-- Toast -->
