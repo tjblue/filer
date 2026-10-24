@@ -6,12 +6,51 @@ let currentViewingFile = null;
 let newItemIsFolder = false;
 let renamingPath = null;
 let moveDestination = '';
+let fileClipboard = null;
+let pendingTransfer = null;
+let transferBusy = false;
+let archivePath = null;
+let archiveEntries = [];
+let archiveBusy = false;
 let expandedFolders = new Set();
 let viewMode = 'list'; // 'list', 'file', or 'search'
 let codeMirrorEditor = null; // CodeMirror instance
 let useCodeMirror = false; // Whether current file uses CodeMirror
 let sortColumn = 'name'; // Current sort column (null = neutral/no sort)
 let sortAscending = true; // Sort direction
+let editorBaseline = null;
+let editorLocation = '';
+let historyIndex = 0;
+let restoringHistory = false;
+
+function editorContent() {
+    return useCodeMirror && codeMirrorEditor
+        ? codeMirrorEditor.getValue() : document.getElementById('fileContent').value;
+}
+
+function hasUnsavedChanges() {
+    return editorBaseline !== null && viewMode === 'file' && currentViewingFile
+        && editorContent() !== editorBaseline;
+}
+
+async function allowNavigation() {
+    return !hasUnsavedChanges() || await showConfirmDialog({
+        title: 'Discard unsaved changes?',
+        message: 'Your edits have not been saved. Leave this file and discard them?',
+        confirmText: 'Discard changes'
+    });
+}
+
+function pushNavigationState(state, title, url) {
+    history.pushState({ ...state, filerIndex: ++historyIndex }, title, url);
+}
+
+window.addEventListener('beforeunload', event => {
+    if (hasUnsavedChanges()) {
+        event.preventDefault();
+        event.returnValue = '';
+    }
+});
 
 // Preview thumbnail sizes per scale setting
 const PREVIEW_SIZES = {
@@ -45,6 +84,10 @@ function updateViewToggleIcon() {
     const icon = document.getElementById('viewToggleIcon');
     if (icon) {
         icon.setAttribute('data-lucide', mobileViewMode === 'grid' ? 'list' : 'layout-grid');
+        const label = mobileViewMode === 'grid' ? 'Switch to list view' : 'Switch to grid view';
+        const button = document.getElementById('viewToggleBtn');
+        button.setAttribute('aria-label', label);
+        button.setAttribute('title', label);
         lucide.createIcons();
     }
 }
@@ -52,29 +95,32 @@ function updateViewToggleIcon() {
 // Toggle Photo Mode
 function togglePhotoMode() {
     photoMode = !photoMode;
+    selectedFiles.clear();
     localStorage.setItem('filer-photoMode', photoMode ? 'true' : 'false');
     updatePhotoModeIcon();
     renderFiles();
+    updateToolbar();
 }
 
 // Update Photo Mode icon
 function updatePhotoModeIcon() {
-    const icon = document.getElementById('photoModeIcon');
-    if (icon) {
-        icon.setAttribute('data-lucide', photoMode ? 'images' : 'images');
-        // Add visual indicator - could add a different color via CSS
-        icon.parentElement.classList.toggle('bg-blue-600', photoMode);
-        icon.parentElement.classList.toggle('hover:bg-blue-700', photoMode);
-        lucide.createIcons();
+    const button = document.getElementById('photoModeBtn');
+    if (button) {
+        button.classList.toggle('bg-blue-600', photoMode);
+        button.setAttribute('aria-pressed', String(photoMode));
+        const label = photoMode ? 'Show all files' : 'Show photos only';
+        button.setAttribute('aria-label', label);
+        button.setAttribute('title', label);
     }
+    document.getElementById('photoModeNotice').classList.toggle('hidden', !photoMode);
 }
 
 // Initialize mobile view mode
 function initMobileViewMode() {
     mobileViewMode = localStorage.getItem('filer-mobileView') || 'grid';
-    // Default photoMode to true on mobile, unless explicitly disabled
+    // Show all files by default; honor an explicitly saved photo-only preference.
     const savedPhotoMode = localStorage.getItem('filer-photoMode');
-    photoMode = savedPhotoMode === null ? isMobile() : savedPhotoMode === 'true';
+    photoMode = savedPhotoMode === 'true';
     updateViewToggleIcon();
     updatePhotoModeIcon();
 }
@@ -291,6 +337,8 @@ function scrollToLine(lineNum) {
 
 // Initialize view from current URL
 async function initializeFromUrl() {
+    historyIndex = history.state?.filerIndex ?? 0;
+    history.replaceState({ ...history.state, filerIndex: historyIndex }, '', window.location.href);
     // Decode the URL path first (handles spaces like %20 -> space)
     const path = decodeURIComponent(window.location.pathname.replace(/^\/+|\/+$/g, ''));
     const urlParams = new URLSearchParams(window.location.search);
@@ -310,6 +358,21 @@ async function initializeFromUrl() {
 
 // Handle browser back/forward buttons
 window.addEventListener('popstate', async (e) => {
+    if (restoringHistory) {
+        restoringHistory = false;
+        return;
+    }
+    const targetIndex = e.state?.filerIndex;
+    if (!await allowNavigation()) {
+        if (Number.isInteger(targetIndex) && targetIndex !== historyIndex) {
+            restoringHistory = true;
+            history.go(historyIndex - targetIndex);
+        } else {
+            pushNavigationState({ path: currentViewingFile.path, type: 'file' }, '', editorLocation);
+        }
+        return;
+    }
+    if (Number.isInteger(targetIndex)) historyIndex = targetIndex;
     // Decode the URL path first (handles spaces like %20 -> space)
     const path = decodeURIComponent(window.location.pathname.replace(/^\/+|\/+$/g, ''));
     const urlParams = new URLSearchParams(window.location.search);
@@ -323,7 +386,7 @@ window.addEventListener('popstate', async (e) => {
     } else {
         // Clear search input when going back to non-search view
         document.getElementById('searchInput').value = '';
-        await navigateTo(path, false);
+        await navigateTo(path, false, true);
     }
 });
 
@@ -339,7 +402,8 @@ window.addEventListener('hashchange', () => {
 });
 
 // Navigate to a path (auto-detect file vs directory)
-async function navigateTo(path, pushHistory = true) {
+async function navigateTo(path, pushHistory = true, discardApproved = false) {
+    if (!discardApproved && !await allowNavigation()) return;
     // Clear search state when navigating
     document.getElementById('searchInput').value = '';
     document.getElementById('searchResultsView').classList.add('hidden');
@@ -353,13 +417,14 @@ async function navigateTo(path, pushHistory = true) {
         selectedFiles.clear();
         viewMode = 'list';
         currentViewingFile = null;
+        editorBaseline = null;
         // Reset sort state to neutral
         sortColumn = null;
         sortAscending = true;
 
-        const newUrl = '/' + encodeURIComponent(currentPath || '');
-        if (pushHistory && window.location.pathname !== newUrl) {
-            history.pushState({ path: currentPath, type: 'dir' }, '', newUrl);
+        const newUrl = fileUrlPath(currentPath || '');
+        if (pushHistory && window.location.pathname + (window.location.search || '') + (window.location.hash || '') !== newUrl) {
+            pushNavigationState({ path: currentPath, type: 'dir' }, '', newUrl);
         }
 
         showListView();
@@ -369,12 +434,12 @@ async function navigateTo(path, pushHistory = true) {
     } catch (err) {
         // Maybe it's a file, try loading as file
         try {
-            await viewFile(path, pushHistory);
+            await viewFile(path, pushHistory, null, true);
         } catch (fileErr) {
             // Neither a valid directory nor file — redirect to root
             showToast(`Not found: /${path}`, 'error');
             if (currentPath !== '' || viewMode !== 'list') {
-                history.replaceState({ path: '', type: 'dir' }, '', '/');
+                history.replaceState({ path: '', type: 'dir', filerIndex: historyIndex }, '', '/');
                 await navigateTo('', false);
             }
         }
@@ -425,8 +490,13 @@ function isImage(filename) {
 }
 
 // View a file
-async function viewFile(path, pushHistory = true, lineRange = null) {
+async function viewFile(path, pushHistory = true, lineRange = null, discardApproved = false) {
+    if (!discardApproved && !await allowNavigation()) return;
     const fileName = path.split('/').pop();
+    if (fileName.toLowerCase().endsWith('.zip')) {
+        await browseArchive(path);
+        return;
+    }
 
     // Update current path context (parent folder)
     const pathParts = path.split('/');
@@ -439,12 +509,12 @@ async function viewFile(path, pushHistory = true, lineRange = null) {
     }
 
     // Update URL
-    let newUrl = '/' + path;
+    let newUrl = fileUrlPath(path);
     if (lineRange) {
         newUrl += '#L' + lineRange.start + (lineRange.end !== lineRange.start ? '-' + lineRange.end : '');
     }
     if (pushHistory && window.location.pathname + window.location.hash !== newUrl) {
-        history.pushState({ path: path, type: 'file', lineRange }, '', newUrl);
+        pushNavigationState({ path: path, type: 'file', lineRange }, '', newUrl);
     }
 
     // Reset to view mode for new file
@@ -561,6 +631,8 @@ function downloadCurrentFile() {
 
 // Enable edit mode
 function enableEditMode() {
+    editorBaseline = editorContent();
+    editorLocation = window.location.pathname + (window.location.search || '') + (window.location.hash || '');
     document.getElementById('editFileBtn').classList.add('hidden');
     document.getElementById('saveFileBtn').classList.remove('hidden');
 
@@ -584,6 +656,7 @@ function enableEditMode() {
 
 // Reset to view mode
 function resetViewMode() {
+    editorBaseline = null;
     document.getElementById('editFileBtn').classList.remove('hidden');
     document.getElementById('saveFileBtn').classList.add('hidden');
 
@@ -606,6 +679,7 @@ function resetViewMode() {
 // Save current file
 async function saveCurrentFile() {
     if (!currentViewingFile || currentViewingFile.isBinary) return;
+    const savingFile = currentViewingFile;
 
     // Get content from CodeMirror or textarea
     let content;
@@ -620,10 +694,11 @@ async function saveCurrentFile() {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                path: currentViewingFile.path,
+                path: savingFile.path,
                 content: content
             })
         });
+        if (currentViewingFile === savingFile) editorBaseline = content;
         showToast('File saved', 'success');
     } catch (err) {
         showToast(err.message, 'error');
@@ -647,13 +722,13 @@ function renderBreadcrumbs(fileName = null) {
         pathSoFar += (pathSoFar ? '/' : '') + part;
         const p = pathSoFar;
         html += `<i data-lucide="chevron-right" class="w-4 h-4 text-gray-500"></i>`;
-        html += `<span class="breadcrumb cursor-pointer text-blue-400 hover:text-blue-300" onclick="navigateTo('${p}')">${part}</span>`;
+        html += `<span class="breadcrumb cursor-pointer text-blue-400 hover:text-blue-300" onclick="navigateTo(${inlineArg(p)})">${escapeHtml(part)}</span>`;
     }
 
     // Show file name in breadcrumbs if viewing a file
     if (fileName) {
         html += `<i data-lucide="chevron-right" class="w-4 h-4 text-gray-500"></i>`;
-        html += `<span class="text-gray-100">${fileName}</span>`;
+        html += `<span class="text-gray-100">${escapeHtml(fileName)}</span>`;
     }
 
     container.innerHTML = html;
@@ -749,7 +824,7 @@ function renderGridView() {
             sortColumn = 'date_taken';
             sortAscending = false; // Newest first
         }
-        sortedFiles = getSortedFiles();
+        sortedFiles = getSortedFiles().filter(f => f.isDirectory || isImage(f.name));
         
         // Render grid with group headers
         renderGridViewWithGroups(sortedFiles);
@@ -772,9 +847,10 @@ function renderGridView() {
                         const selected = selectedFiles.has(file.path) ? 'selected' : '';
 
                         return `
-                            <div class="file-grid-cell ${selected}" data-path="${file.path}" 
-                                 onclick="handleGridClick('${file.path}', ${file.isDirectory}, ${index})"
-                                 oncontextmenu="handleRightClick(event, '${file.path}')">
+                            <div class="file-grid-cell ${selected}" data-path="${escapeHtml(file.path)}"
+                                 onclick="handleGridClick(${inlineArg(file.path)}, ${file.isDirectory}, ${index})"
+                                 oncontextmenu="handleRightClick(event, ${inlineArg(file.path)})">
+                                ${renderGridSelection(file)}
                                 ${!file.isDirectory && isImage(file.name) ? `
                                     <div class="file-grid-thumb" data-image-index="${index}">
                                         <img src="/api/thumb?path=${encodeURIComponent(file.path)}&size=70" 
@@ -785,7 +861,7 @@ function renderGridView() {
                                         <i data-lucide="${icon}" class="${iconColor} w-6 h-6"></i>
                                     </div>
                                 `}
-                                <span class="file-grid-name" title="${file.name}">${file.name}</span>
+                                <span class="file-grid-name" title="${escapeHtml(file.name)}">${escapeHtml(file.name)}</span>
                             </div>
                         `;
                     }).join('')}
@@ -862,9 +938,10 @@ function renderGridGroup(files, allFiles) {
         const actualIndex = allFiles ? allFiles.indexOf(file) : index;
         
         html += `
-            <div class="file-grid-cell ${selected}" data-path="${file.path}" 
-                 onclick="handleGridClick('${file.path}', ${file.isDirectory}, ${actualIndex})"
-                 oncontextmenu="handleRightClick(event, '${file.path}')">
+            <div class="file-grid-cell ${selected}" data-path="${escapeHtml(file.path)}"
+                 onclick="handleGridClick(${inlineArg(file.path)}, ${file.isDirectory}, ${actualIndex})"
+                 oncontextmenu="handleRightClick(event, ${inlineArg(file.path)})">
+                ${renderGridSelection(file)}
                 ${!file.isDirectory && isImage(file.name) ? `
                     <div class="file-grid-thumb" data-image-index="${actualIndex}">
                         <img src="/api/thumb?path=${encodeURIComponent(file.path)}&size=70" 
@@ -875,13 +952,26 @@ function renderGridGroup(files, allFiles) {
                         <i data-lucide="${icon}" class="${iconColor} w-6 h-6"></i>
                     </div>
                 `}
-                <span class="file-grid-name" title="${file.name}">${file.name}</span>
+                <span class="file-grid-name" title="${escapeHtml(file.name)}">${escapeHtml(file.name)}</span>
             </div>
         `;
     });
     
     html += '</div>';
     return html;
+}
+
+function renderGridSelection(file) {
+    const selected = selectedFiles.has(file.path);
+    return `<button class="grid-select" aria-label="Select ${escapeHtml(file.name)}" aria-pressed="${selected}"
+                    onclick="event.stopPropagation(); toggleSelect(${inlineArg(file.path)})">
+                <span class="grid-select-dot" aria-hidden="true">${selected ? '&#10003;' : ''}</span>
+            </button>`;
+}
+
+function handleRightClick(event, path) {
+    event.preventDefault();
+    toggleSelect(path);
 }
 
 // Handle grid cell click
@@ -894,7 +984,7 @@ function handleGridClick(path, isDirectory, index) {
     if (isDirectory) {
         navigateTo(path);
     } else if (isImage(path)) {
-        openImageViewer(index);
+        openImageViewer(currentFolderImages.indexOf(path));
     } else {
         viewFile(path);
     }
@@ -904,6 +994,8 @@ function handleGridClick(path, isDirectory, index) {
 function renderFiles() {
     const tbody = document.getElementById('fileList');
     const emptyState = document.getElementById('emptyState');
+    document.getElementById('fileListView').classList.toggle('mobile-grid-active', isMobile() && mobileViewMode === 'grid');
+    document.getElementById('fileListView').classList.toggle('photo-mode-active', isMobile() && photoMode);
 
     updateSortIndicators();
 
@@ -932,7 +1024,7 @@ function renderFiles() {
             sortColumn = 'date_taken';
             sortAscending = false; // Newest first
         }
-        sortedFiles = getSortedFiles();
+        sortedFiles = getSortedFiles().filter(f => f.isDirectory || isImage(f.name));
         
         // Render with grouping
         renderFilesWithGroups(sortedFiles);
@@ -962,15 +1054,15 @@ function renderFiles() {
         }
 
         return `
-            <tr class="file-row border-b border-gray-700 ${selected}" data-path="${file.path}">
+            <tr class="file-row border-b border-gray-700 ${selected}" data-path="${escapeHtml(file.path)}">
                 <td class="p-3">
-                    <input type="checkbox" class="file-checkbox rounded bg-gray-700 border-gray-600" data-path="${file.path}"
-                           ${selected ? 'checked' : ''} onchange="toggleSelect('${file.path}')">
+                    <input type="checkbox" class="file-checkbox rounded bg-gray-700 border-gray-600" data-path="${escapeHtml(file.path)}"
+                           ${selected ? 'checked' : ''} onchange="toggleSelect(${inlineArg(file.path)})">
                 </td>
                 <td class="p-3">
-                    <div class="flex items-center gap-2 cursor-pointer" onclick="handleClick('${file.path}', ${file.isDirectory})">
+                    <div class="flex items-center gap-2 cursor-pointer" onclick="handleClick(${inlineArg(file.path)}, ${file.isDirectory})">
                         ${iconHtml}
-                        <span class="text-gray-100 hover:text-blue-400">${file.name}</span>
+                        <span class="text-gray-100 hover:text-blue-400">${escapeHtml(file.name)}</span>
                     </div>
                 </td>
                 <td class="p-3 text-sm text-gray-400">${size}</td>
@@ -978,16 +1070,16 @@ function renderFiles() {
                 <td class="p-3">
                     <div class="flex gap-1 justify-end">
                         ${!file.isDirectory ? `
-                            <button onclick="event.stopPropagation(); downloadFile('${file.path}')" class="p-1.5 hover:bg-gray-700 rounded" title="Download">
+                            <button onclick="event.stopPropagation(); downloadFile(${inlineArg(file.path)})" class="p-1.5 hover:bg-gray-700 rounded" title="Download">
                                 <i data-lucide="download" class="w-4 h-4 text-gray-400"></i>
                             </button>
                         ` : `
                             <span class="p-1.5 w-8"></span>
                         `}
-                        <button onclick="event.stopPropagation(); showRenameModal('${file.path}', '${file.name}')" class="p-1.5 hover:bg-gray-700 rounded" title="Rename">
+                        <button onclick="event.stopPropagation(); showRenameModal(${inlineArg(file.path)}, ${inlineArg(file.name)})" class="p-1.5 hover:bg-gray-700 rounded" title="Rename">
                             <i data-lucide="pen-line" class="w-4 h-4 text-gray-400"></i>
                         </button>
-                        <button onclick="event.stopPropagation(); deleteSingle('${file.path}')" class="p-1.5 hover:bg-gray-700 rounded" title="Delete">
+                        <button onclick="event.stopPropagation(); deleteSingle(${inlineArg(file.path)})" class="p-1.5 hover:bg-gray-700 rounded" title="Delete">
                             <i data-lucide="trash-2" class="w-4 h-4 text-red-400"></i>
                         </button>
                     </div>
@@ -1079,15 +1171,15 @@ function renderFileRow(file, sizes) {
     }
 
     return `
-        <tr class="file-row border-b border-gray-700 ${selected}" data-path="${file.path}">
+        <tr class="file-row border-b border-gray-700 ${selected}" data-path="${escapeHtml(file.path)}">
             <td class="p-3">
-                <input type="checkbox" class="file-checkbox rounded bg-gray-700 border-gray-600" data-path="${file.path}"
-                       ${selected ? 'checked' : ''} onchange="toggleSelect('${file.path}')">
+                <input type="checkbox" class="file-checkbox rounded bg-gray-700 border-gray-600" data-path="${escapeHtml(file.path)}"
+                       ${selected ? 'checked' : ''} onchange="toggleSelect(${inlineArg(file.path)})">
             </td>
             <td class="p-3">
-                <div class="flex items-center gap-2 cursor-pointer" onclick="handleClick('${file.path}', ${file.isDirectory})">
+                <div class="flex items-center gap-2 cursor-pointer" onclick="handleClick(${inlineArg(file.path)}, ${file.isDirectory})">
                     ${iconHtml}
-                    <span class="text-gray-100 hover:text-blue-400">${file.name}</span>
+                    <span class="text-gray-100 hover:text-blue-400">${escapeHtml(file.name)}</span>
                 </div>
             </td>
             <td class="p-3 text-sm text-gray-400">${size}</td>
@@ -1095,16 +1187,16 @@ function renderFileRow(file, sizes) {
             <td class="p-3">
                 <div class="flex gap-1 justify-end">
                     ${!file.isDirectory ? `
-                        <button onclick="event.stopPropagation(); downloadFile('${file.path}')" class="p-1.5 hover:bg-gray-700 rounded" title="Download">
+                        <button onclick="event.stopPropagation(); downloadFile(${inlineArg(file.path)})" class="p-1.5 hover:bg-gray-700 rounded" title="Download">
                             <i data-lucide="download" class="w-4 h-4 text-gray-400"></i>
                         </button>
                     ` : `
                         <span class="p-1.5 w-8"></span>
                     `}
-                    <button onclick="event.stopPropagation(); showRenameModal('${file.path}', '${file.name}')" class="p-1.5 hover:bg-gray-700 rounded" title="Rename">
+                    <button onclick="event.stopPropagation(); showRenameModal(${inlineArg(file.path)}, ${inlineArg(file.name)})" class="p-1.5 hover:bg-gray-700 rounded" title="Rename">
                         <i data-lucide="pen-line" class="w-4 h-4 text-gray-400"></i>
                     </button>
-                    <button onclick="event.stopPropagation(); deleteSingle('${file.path}')" class="p-1.5 hover:bg-gray-700 rounded" title="Delete">
+                    <button onclick="event.stopPropagation(); deleteSingle(${inlineArg(file.path)})" class="p-1.5 hover:bg-gray-700 rounded" title="Delete">
                         <i data-lucide="trash-2" class="w-4 h-4 text-red-400"></i>
                     </button>
                 </div>
@@ -1163,10 +1255,27 @@ function toggleSelect(path) {
     updateToolbar();
 }
 
+function getVisibleFiles() {
+    return isMobile() && photoMode ? files.filter(f => f.isDirectory || isImage(f.name)) : files;
+}
+
+function selectAllFiles() {
+    selectedFiles.clear();
+    getVisibleFiles().forEach(file => selectedFiles.add(file.path));
+    renderFiles();
+    updateToolbar();
+}
+
+function clearSelection() {
+    selectedFiles.clear();
+    renderFiles();
+    updateToolbar();
+}
+
 function toggleSelectAll() {
     const selectAll = document.getElementById('selectAll');
     if (selectAll.checked) {
-        files.forEach(f => selectedFiles.add(f.path));
+        getVisibleFiles().forEach(f => selectedFiles.add(f.path));
     } else {
         selectedFiles.clear();
     }
@@ -1176,6 +1285,8 @@ function toggleSelectAll() {
 
 function updateToolbar() {
     const hasSelection = selectedFiles.size > 0;
+    document.getElementById('copyBtn').classList.toggle('hidden', !hasSelection);
+    document.getElementById('pasteBtn').classList.toggle('hidden', !fileClipboard || fileClipboard.paths.length === 0);
     const deleteBtn = document.getElementById('deleteBtn');
     const moveBtn = document.getElementById('moveBtn');
     const zipBtn = document.getElementById('zipBtn');
@@ -1196,7 +1307,10 @@ function updateToolbar() {
     newFolderBtn.classList.toggle('flex', !hasSelection);
     uploadBtn.classList.toggle('hidden', hasSelection);
     uploadBtn.classList.toggle('flex', !hasSelection);
-    document.getElementById('selectAll').checked = selectedFiles.size === files.length && files.length > 0;
+    const visibleFiles = getVisibleFiles();
+    document.getElementById('selectAll').checked = visibleFiles.length > 0 && visibleFiles.every(file => selectedFiles.has(file.path));
+    document.getElementById('mobileSelectionBar').classList.toggle('hidden', !hasSelection);
+    document.getElementById('mobileSelectionCount').textContent = `${selectedFiles.size} selected`;
     // Refresh icons when buttons change visibility
     lucide.createIcons();
 }
@@ -1317,7 +1431,7 @@ class StreamDownloader {
             if (window.showSaveFilePicker) {
                 await this._downloadWithFileSystemAPI(url);
             } else {
-                await this._downloadWithBlob(url);
+                this._downloadNatively(url);
             }
         } catch (err) {
             if (this.cancelled || err.name === 'AbortError') {
@@ -1326,7 +1440,7 @@ class StreamDownloader {
                 showToast('Download failed: ' + err.message, 'error');
             }
         } finally {
-            this._cleanup();
+            await this._cleanup();
         }
     }
 
@@ -1354,6 +1468,7 @@ class StreamDownloader {
         this.writable = await this.fileHandle.createWritable();
 
         const reader = response.body.getReader();
+        this.reader = reader;
 
         while (true) {
             const { done, value } = await reader.read();
@@ -1375,6 +1490,7 @@ class StreamDownloader {
             updateDownloadProgress(percent, speed, downloaded, totalSize);
         }
 
+        if (totalSize && downloaded !== totalSize) throw new Error("Download was interrupted");
         await this.writable.close();
         this.writable = null;
 
@@ -1382,51 +1498,15 @@ class StreamDownloader {
         showToast('Download complete', 'success');
     }
 
-    async _downloadWithBlob(url) {
-        const response = await fetch(url, { signal: this.abortController.signal });
-        if (!response.ok) throw new Error(`Server returned ${response.status}`);
-
-        const totalSize = parseInt(response.headers.get('Content-Length'), 10) || 0;
-        let downloaded = 0;
-        let lastTime = performance.now();
-        let lastBytes = 0;
-        let speed = 0;
-        const chunks = [];
-
-        const reader = response.body.getReader();
-
-        while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-
-            chunks.push(value);
-            downloaded += value.byteLength;
-
-            const now = performance.now();
-            const elapsed = (now - lastTime) / 1000;
-            if (elapsed >= 0.2) {
-                speed = (downloaded - lastBytes) / elapsed;
-                lastBytes = downloaded;
-                lastTime = now;
-            }
-
-            const percent = totalSize ? (downloaded / totalSize) * 100 : 0;
-            updateDownloadProgress(percent, speed, downloaded, totalSize);
-        }
-
-        // Merge chunks into Blob and trigger download
-        const blob = new Blob(chunks);
-        const blobUrl = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = blobUrl;
-        a.download = this.fileName;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(blobUrl);
-
-        hideDownloadProgress();
-        showToast('Download complete', 'success');
+    _downloadNatively(url) {
+        // Let the browser stream to disk instead of collecting a multi-GB Blob in RAM.
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = this.fileName;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        showToast('Download started in your browser; use its downloads panel for progress or cancellation', 'info');
     }
 
     cancel() {
@@ -1437,12 +1517,19 @@ class StreamDownloader {
 
     async _cleanupWritable() {
         if (this.writable) {
-            try { await this.writable.abort(); } catch (e) { /* ignore */ }
+            const writable = this.writable;
             this.writable = null;
+            try { await writable.abort(); } catch (e) { /* ignore */ }
         }
     }
 
-    _cleanup() {
+    async _cleanup() {
+        await this._cleanupWritable();
+        if (this.reader) {
+            try { await this.reader.cancel(); } catch (e) { /* already closed */ }
+            this.reader.releaseLock();
+            this.reader = null;
+        }
         hideDownloadProgress();
         activeDownloader = null;
         this.writable = null;
@@ -1550,15 +1637,16 @@ function cancelActiveUpload() {
 
 class ChunkedUploader {
     constructor(files, destPath) {
-        // files: array of { file: File, destPath: string }
         this.files = files;
         this.destPath = destPath;
         this.cancelled = false;
+        this.failed = false;
         this.activeXHRs = new Set();
         this.currentUploadId = null;
-        this.totalBytes = files.reduce((sum, f) => sum + f.file.size, 0);
-        this.uploadedBytes = 0; // bytes fully uploaded across completed files
-        this.chunkProgress = new Map(); // chunk index -> bytes loaded
+        this.resumeKey = null;
+        this.totalBytes = files.reduce((sum, entry) => sum + entry.file.size, 0);
+        this.uploadedBytes = 0;
+        this.chunkProgress = new Map();
         this.lastTime = performance.now();
         this.lastBytes = 0;
         this.speed = 0;
@@ -1570,44 +1658,38 @@ class ChunkedUploader {
             return;
         }
         activeUploader = this;
-
-        const totalLabel = this.files.length === 1
-            ? this.files[0].file.name
-            : `${this.files.length} files`;
-        showUploadProgress(totalLabel);
-
+        showUploadProgress(this.files.length === 1 ? this.files[0].file.name : `${this.files.length} files`);
+        let completed = 0;
+        const errors = [];
         try {
-            for (let i = 0; i < this.files.length; i++) {
+            for (const { file, destPath } of this.files) {
                 if (this.cancelled) break;
-                const { file, destPath } = this.files[i];
-
-                // Update label for current file
-                const label = this.files.length === 1
-                    ? file.name
-                    : `${file.name} (${i + 1}/${this.files.length})`;
-                document.getElementById('uploadFileName').textContent = label;
-                document.getElementById('uploadFileName').title = label;
-
+                this.failed = false;
+                this.currentUploadId = null;
+                this.resumeKey = null;
                 this.chunkProgress = new Map();
-
-                if (file.size < CHUNK_SIZE) {
-                    await this._uploadSmall(file, destPath);
-                } else {
-                    await this._uploadChunked(file, destPath);
+                document.getElementById('uploadFileName').textContent = file.name;
+                document.getElementById('uploadFileName').title = file.name;
+                try {
+                    if (file.size < CHUNK_SIZE) await this._uploadSmall(file, destPath);
+                    else await this._uploadChunked(file, destPath);
+                    if (!this.cancelled) {
+                        completed++;
+                        this.uploadedBytes += file.size;
+                    }
+                } catch (error) {
+                    if (!this.cancelled) {
+                        const resume = this.currentUploadId ? ' Select this file again to resume.' : '';
+                        errors.push({ error: `${file.name}: ${error.message}.${resume}` });
+                    }
                 }
-
-                this.uploadedBytes += file.size;
             }
-
-            if (!this.cancelled) {
-                showToast(`Uploaded ${this.files.length} file(s)`, 'success');
-                refreshFiles();
-            }
-        } catch (err) {
-            if (!this.cancelled) {
-                showToast('Upload failed: ' + err.message, 'error');
-            }
+            if (completed > 0) await refreshFiles();
+            if (!this.cancelled) reportOperationResult('Uploaded', completed, errors);
         } finally {
+            if (this.cancelled) await this._cancelSession();
+            for (const xhr of this.activeXHRs) xhr.abort();
+            this.activeXHRs.clear();
             hideUploadProgress();
             activeUploader = null;
             this.currentUploadId = null;
@@ -1615,186 +1697,198 @@ class ChunkedUploader {
     }
 
     _updateProgress() {
-        const currentFileUploaded = [...this.chunkProgress.values()].reduce((a, b) => a + b, 0);
-        const totalUploaded = this.uploadedBytes + currentFileUploaded;
-        const percent = this.totalBytes ? (totalUploaded / this.totalBytes) * 100 : 0;
-
+        const total = this.uploadedBytes + [...this.chunkProgress.values()].reduce((a, b) => a + b, 0);
         const now = performance.now();
         const elapsed = (now - this.lastTime) / 1000;
         if (elapsed >= 0.2) {
-            this.speed = (totalUploaded - this.lastBytes) / elapsed;
-            this.lastBytes = totalUploaded;
+            this.speed = Math.max(0, (total - this.lastBytes) / elapsed);
+            this.lastBytes = total;
             this.lastTime = now;
         }
-
-        updateUploadProgress(percent, this.speed, totalUploaded, this.totalBytes);
+        updateUploadProgress(this.totalBytes ? total / this.totalBytes * 100 : 0, this.speed, total, this.totalBytes);
     }
 
-    async _uploadSmall(file, destPath) {
+    async _json(url, data) {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 30000);
+        try {
+            const response = await fetch(url, {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(data), signal: controller.signal
+            });
+            let body;
+            try { body = await response.json(); }
+            catch (error) { throw new Error(`Invalid server response (${response.status})`); }
+            if (!response.ok) throw Object.assign(new Error(body.error || `Request failed (${response.status})`), { status: response.status });
+            return body;
+        } finally {
+            clearTimeout(timer);
+        }
+    }
+
+    _remember(id) {
+        if (!this.resumeKey) return;
+        try {
+            if (id) localStorage.setItem(this.resumeKey, id);
+            else localStorage.removeItem(this.resumeKey);
+        } catch (error) { /* Uploading still works if browser storage is unavailable. */ }
+    }
+
+    _xhr(url, form, key, size, validate) {
         return new Promise((resolve, reject) => {
             const xhr = new XMLHttpRequest();
             this.activeXHRs.add(xhr);
-
-            xhr.upload.addEventListener('progress', (e) => {
-                if (e.lengthComputable) {
-                    this.chunkProgress.set('small', e.loaded);
+            xhr.timeout = 120000;
+            const fail = (message, retryable = false) => {
+                this.activeXHRs.delete(xhr);
+                reject(Object.assign(new Error(message), { retryable }));
+            };
+            xhr.upload.addEventListener('progress', event => {
+                if (event.lengthComputable) {
+                    this.chunkProgress.set(key, Math.min(event.loaded, size));
                     this._updateProgress();
                 }
             });
-
             xhr.addEventListener('load', () => {
                 this.activeXHRs.delete(xhr);
-                if (xhr.status >= 200 && xhr.status < 300) {
-                    this.chunkProgress.set('small', file.size);
-                    resolve();
-                } else {
-                    reject(new Error(`Upload failed (${xhr.status})`));
+                let body;
+                try { body = JSON.parse(xhr.responseText); }
+                catch (error) { fail(`Invalid server response (${xhr.status})`, xhr.status >= 500); return; }
+                if (xhr.status < 200 || xhr.status >= 300) {
+                    fail(body.error || `Upload failed (${xhr.status})`, [408, 429, 500, 502, 503, 504].includes(xhr.status));
+                    return;
                 }
+                try { validate(body); }
+                catch (error) { reject(error); return; }
+                this.chunkProgress.set(key, size);
+                this._updateProgress();
+                resolve(body);
             });
+            xhr.addEventListener('error', () => fail('Network error', true));
+            xhr.addEventListener('timeout', () => fail('Upload timed out', true));
+            xhr.addEventListener('abort', () => fail('Upload cancelled'));
+            xhr.open('POST', url);
+            xhr.send(form);
+        });
+    }
 
-            xhr.addEventListener('error', () => {
-                this.activeXHRs.delete(xhr);
-                reject(new Error('Network error'));
-            });
-
-            xhr.addEventListener('abort', () => {
-                this.activeXHRs.delete(xhr);
-                reject(new Error('Upload cancelled'));
-            });
-
-            const formData = new FormData();
-            formData.append('path', destPath);
-            formData.append('files', file);
-
-            xhr.open('POST', '/api/upload');
-            xhr.send(formData);
+    _uploadSmall(file, destPath) {
+        const form = new FormData();
+        form.append('path', destPath);
+        form.append('files', file);
+        return this._xhr('/api/upload', form, 'small', file.size, body => {
+            if (body.errors?.length || body.uploaded?.length !== 1) {
+                throw new Error(body.errors?.[0]?.error || 'The file was not uploaded');
+            }
         });
     }
 
     async _uploadChunked(file, destPath) {
-        // Init
-        const initResp = await fetch('/api/upload/init', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                fileName: file.name,
-                fileSize: file.size,
-                destPath: destPath
-            })
-        });
-        if (!initResp.ok) {
-            const err = await initResp.json().catch(() => ({}));
-            throw new Error(err.error || `Init failed (${initResp.status})`);
-        }
-        const { uploadId } = await initResp.json();
-        this.currentUploadId = uploadId;
-
-        // Build chunk descriptors
-        const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
-        const chunks = [];
-        for (let i = 0; i < totalChunks; i++) {
-            const start = i * CHUNK_SIZE;
-            chunks.push({ index: i, start, end: Math.min(start + CHUNK_SIZE, file.size) });
-        }
-
-        // Shared queue index for workers
-        let nextChunk = 0;
-        const self = this;
-
-        async function worker() {
-            while (!self.cancelled) {
-                const ci = nextChunk++;
-                if (ci >= chunks.length) break;
-                await self._sendChunk(uploadId, file, chunks[ci]);
+        this.resumeKey = 'filer-upload-v1:' + JSON.stringify([destPath, file.name, file.size, file.lastModified]);
+        let id;
+        try { id = localStorage.getItem(this.resumeKey); } catch (error) { /* no browser storage */ }
+        let status;
+        if (id) {
+            this.currentUploadId = id;
+            try {
+                status = await this._json('/api/upload/status', { uploadId: id });
+            } catch (error) {
+                if (![404, 410].includes(error.status)) throw error;
+                id = null;
+                this.currentUploadId = null;
+                this._remember(null);
             }
         }
-
-        // Launch parallel workers
-        const workers = [];
-        for (let w = 0; w < Math.min(PARALLEL_CHUNKS, totalChunks); w++) {
-            workers.push(worker());
+        if (!id) {
+            if (this.cancelled) return;
+            const init = await this._json('/api/upload/init', { fileName: file.name, fileSize: file.size, destPath });
+            if (typeof init.uploadId !== 'string' || !Number.isInteger(init.chunkSize) || init.chunkSize <= 0) {
+                throw new Error('Invalid upload initialization response');
+            }
+            id = init.uploadId;
+            status = { received: [], chunkSize: init.chunkSize };
+            this.currentUploadId = id;
+            this._remember(id);
         }
-        await Promise.all(workers);
-
+        if (this.cancelled) { await this._cancelSession(); return; }
+        if (typeof status.completed === 'string' && status.completed) {
+            this._remember(null);
+            this.currentUploadId = null;
+            return;
+        }
+        const chunkSize = status.chunkSize;
+        if (!Number.isInteger(chunkSize) || chunkSize <= 0 || (status.fileSize !== undefined && status.fileSize !== file.size)) {
+            throw new Error('Upload checkpoint does not match this file');
+        }
+        const received = new Set(status.received);
+        const chunks = [];
+        for (let index = 0; index < Math.ceil(file.size / chunkSize); index++) {
+            const start = index * chunkSize;
+            const end = Math.min(start + chunkSize, file.size);
+            if (received.has(index)) this.chunkProgress.set(index, end - start);
+            else chunks.push({ index, start, end });
+        }
+        this._updateProgress();
+        let next = 0;
+        const worker = async () => {
+            while (!this.cancelled && !this.failed) {
+                const chunk = chunks[next++];
+                if (!chunk) return;
+                try { await this._sendChunk(id, file, chunk); }
+                catch (error) { this.failed = true; throw error; }
+            }
+        };
+        // Await every worker before changing session state or moving to another file.
+        const results = await Promise.allSettled(Array.from({ length: Math.min(PARALLEL_CHUNKS, chunks.length) }, worker));
         if (this.cancelled) return;
-
-        // Complete
-        const completeResp = await fetch('/api/upload/complete', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                uploadId: uploadId,
-                fileName: file.name,
-                destPath: destPath
-            })
-        });
-        if (!completeResp.ok) {
-            const err = await completeResp.json().catch(() => ({}));
-            throw new Error(err.error || `Complete failed (${completeResp.status})`);
+        const failure = results.find(result => result.status === 'rejected');
+        if (failure) throw failure.reason;
+        const completed = await this._json('/api/upload/complete', { uploadId: id });
+        if (!completed.success || typeof completed.path !== 'string') {
+            throw new Error('The server did not confirm upload completion');
         }
+        this._remember(null);
         this.currentUploadId = null;
     }
 
-    _sendChunk(uploadId, file, { index, start, end }) {
-        return new Promise((resolve, reject) => {
-            const xhr = new XMLHttpRequest();
-            this.activeXHRs.add(xhr);
-
-            xhr.upload.addEventListener('progress', (e) => {
-                if (e.lengthComputable) {
-                    this.chunkProgress.set(index, e.loaded);
-                    this._updateProgress();
-                }
-            });
-
-            xhr.addEventListener('load', () => {
-                this.activeXHRs.delete(xhr);
-                if (xhr.status >= 200 && xhr.status < 300) {
-                    this.chunkProgress.set(index, end - start);
-                    this._updateProgress();
-                    resolve();
-                } else {
-                    reject(new Error(`Chunk upload failed (${xhr.status})`));
-                }
-            });
-
-            xhr.addEventListener('error', () => {
-                this.activeXHRs.delete(xhr);
-                reject(new Error('Network error'));
-            });
-
-            xhr.addEventListener('abort', () => {
-                this.activeXHRs.delete(xhr);
-                reject(new Error('Upload cancelled'));
-            });
-
-            const blob = file.slice(start, end);
-            const formData = new FormData();
-            formData.append('uploadId', uploadId);
-            formData.append('chunkIndex', index);
-            formData.append('chunk', blob);
-
-            xhr.open('POST', '/api/upload/chunk');
-            xhr.send(formData);
-        });
+    async _sendChunk(id, file, chunk) {
+        for (let attempt = 0; ; attempt++) {
+            if (this.cancelled || this.failed) throw new Error('Upload cancelled');
+            const form = new FormData();
+            form.append('uploadId', id);
+            form.append('chunkIndex', chunk.index);
+            form.append('chunk', file.slice(chunk.start, chunk.end));
+            try {
+                return await this._xhr('/api/upload/chunk', form, chunk.index, chunk.end - chunk.start, body => {
+                    if (!body.received) throw new Error('Chunk was not acknowledged');
+                });
+            } catch (error) {
+                if (this.cancelled || !error.retryable || attempt >= 2) throw error;
+                await new Promise(resolve => setTimeout(resolve, 500 * (attempt + 1)));
+            }
+        }
     }
 
-    cancel() {
+    async _cancelSession() {
+        const id = this.currentUploadId;
+        if (!id) return true;
+        try {
+            const cancelled = await this._json('/api/upload/cancel', { uploadId: id });
+            if (!cancelled.success) throw new Error('Cancellation was not acknowledged');
+            if (this.currentUploadId === id) this.currentUploadId = null;
+            this._remember(null);
+            return true;
+        } catch (error) {
+            showToast('Could not finish cancelling the upload. Its checkpoint is retained for retry.', 'error');
+            return false;
+        }
+    }
+
+    async cancel() {
         this.cancelled = true;
-        for (const xhr of this.activeXHRs) {
-            xhr.abort();
-        }
+        for (const xhr of this.activeXHRs) xhr.abort();
         this.activeXHRs.clear();
-        // Cancel server-side if we have an active chunked upload
-        if (this.currentUploadId) {
-            fetch('/api/upload/cancel', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ uploadId: this.currentUploadId })
-            }).catch(() => {});
-            this.currentUploadId = null;
-        }
-        showToast('Upload cancelled', 'info');
+        if (await this._cancelSession()) showToast('Upload cancelled', 'info');
     }
 }
 
@@ -1811,6 +1905,21 @@ async function uploadFiles(fileList) {
     await uploader.start();
 
     document.getElementById('uploadInput').value = '';
+}
+
+function reportOperationResult(verb, count, errors = []) {
+    if (errors.length > 0) {
+        showToast(`${verb} ${count} item(s); ${errors.length} failed: ${errors[0].error}`, 'error');
+    } else {
+        showToast(`${verb} ${count} item(s)`, count > 0 ? 'success' : 'info');
+    }
+}
+
+async function refreshWithFailedSelection(paths) {
+    await refreshFiles();
+    selectedFiles = new Set(paths.filter(path => files.some(file => file.path === path)));
+    renderFiles();
+    updateToolbar();
 }
 
 // Delete
@@ -1843,23 +1952,30 @@ async function deleteFiles(paths) {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ paths })
         });
-        showToast(`Deleted ${result.deleted.length} item(s)`, 'success');
-        refreshFiles();
+        await refreshWithFailedSelection(result.errors.map(error => error.path));
+        reportOperationResult('Deleted', result.deleted.length, result.errors);
     } catch (err) {
         showToast(err.message, 'error');
     }
 }
 
 // Move
-async function showMoveModal() {
-    if (selectedFiles.size === 0) return;
+async function showMoveModal(clipboard = false) {
+    if (transferBusy) return;
+    const paths = clipboard && fileClipboard ? [...fileClipboard.paths] : Array.from(selectedFiles);
+    if (paths.length === 0) return;
+    pendingTransfer = { paths, action: clipboard ? fileClipboard.action : 'move' };
+    const label = pendingTransfer.action === 'copy' ? 'Copy' : 'Move';
+    document.getElementById('transferTitle').textContent = `${label} to...`;
+    document.getElementById('transferSubmit').textContent = `${label} Here`;
+    document.getElementById('transferConflict').value = clipboard ? 'keep_both' : 'skip';
 
-    moveDestination = '';
-    document.getElementById('moveDestinationDisplay').textContent = 'Root';
+    moveDestination = clipboard ? currentPath : '';
+    document.getElementById('moveDestinationDisplay').textContent = moveDestination || 'Root';
     document.getElementById('moveModal').classList.remove('hidden');
 
     // Fetch folder tree, excluding selected items
-    const excludeParams = Array.from(selectedFiles).map(p => `exclude=${encodeURIComponent(p)}`).join('&');
+    const excludeParams = paths.map(p => `exclude=${encodeURIComponent(p)}`).join('&');
     try {
         const data = await api(`/api/folders?${excludeParams}`);
         renderFolderTree(data.folders);
@@ -1901,7 +2017,7 @@ function renderFolderTree(folders) {
 
     let html = `
         <div class="folder-item flex items-center gap-2 p-2 rounded cursor-pointer hover:bg-gray-700 ${moveDestination === '' ? 'bg-gray-700' : ''}"
-             onclick="selectMoveDestination('', 'Root')">
+             onclick="selectMoveDestination('', 'Root', event)">
             <i data-lucide="hard-drive" class="w-5 h-5 text-blue-400"></i>
             <span class="text-gray-100 font-medium">Root</span>
         </div>
@@ -1921,30 +2037,29 @@ function renderFolderLevel(folders) {
         const hasChildren = folder.children && folder.children.length > 0;
         const isSelected = moveDestination === folder.path;
         const isExpanded = expandedFolders.has(folder.path);
-        const escapedPath = folder.path.replace(/'/g, "\\'");
 
         const chevron = hasChildren
-            ? `<i data-lucide="${isExpanded ? 'chevron-down' : 'chevron-right'}" data-folder-chevron="${folder.path}" class="w-4 h-4 text-gray-400 shrink-0 cursor-pointer" onclick="toggleFolder('${escapedPath}', event)"></i>`
+            ? `<i data-lucide="${isExpanded ? 'chevron-down' : 'chevron-right'}" data-folder-chevron="${escapeHtml(folder.path)}" class="w-4 h-4 text-gray-400 shrink-0 cursor-pointer" onclick="toggleFolder(${inlineArg(folder.path)}, event)"></i>`
             : `<span class="w-4 h-4 shrink-0"></span>`;
 
         html += `
             <div class="folder-item flex items-center gap-1 p-2 rounded cursor-pointer hover:bg-gray-700 ${isSelected ? 'bg-gray-700' : ''}"
-                 onclick="selectMoveDestination('${escapedPath}', '${folder.name.replace(/'/g, "\\'")}')">
+                 onclick="selectMoveDestination(${inlineArg(folder.path)}, ${inlineArg(folder.name)}, event)">
                 ${chevron}
                 <i data-lucide="folder" class="w-4 h-4 text-yellow-400 shrink-0"></i>
-                <span class="text-gray-200 text-sm">${folder.name}</span>
+                <span class="text-gray-200 text-sm">${escapeHtml(folder.name)}</span>
             </div>
         `;
 
         if (hasChildren) {
-            html += `<div id="folder-children-${folder.path}" class="ml-2 pl-2 border-l border-gray-700 ${isExpanded ? '' : 'hidden'}">${renderFolderLevel(folder.children)}</div>`;
+            html += `<div id="folder-children-${escapeHtml(folder.path)}" class="ml-2 pl-2 border-l border-gray-700 ${isExpanded ? '' : 'hidden'}">${renderFolderLevel(folder.children)}</div>`;
         }
     }
 
     return html;
 }
 
-function selectMoveDestination(path, name) {
+function selectMoveDestination(path, name, event) {
     moveDestination = path;
     document.getElementById('moveDestinationDisplay').textContent = path || 'Root';
 
@@ -1952,15 +2067,18 @@ function selectMoveDestination(path, name) {
     document.querySelectorAll('#folderTree .folder-item').forEach(el => {
         el.classList.remove('bg-gray-700');
     });
-    event.currentTarget.classList.add('bg-gray-700');
+    if (event) event.currentTarget.classList.add('bg-gray-700');
 }
 
 function closeMoveModal() {
+    if (transferBusy) return;
     document.getElementById('moveModal').classList.add('hidden');
 }
 
 async function moveSelected() {
-    const items = Array.from(selectedFiles).map(source => {
+    if (transferBusy) return;
+    const transfer = pendingTransfer || { paths: Array.from(selectedFiles), action: 'move' };
+    const items = transfer.paths.map(source => {
         const name = source.split('/').pop();
         return {
             source,
@@ -1968,19 +2086,168 @@ async function moveSelected() {
         };
     });
 
+    const conflict = document.getElementById('transferConflict').value || 'skip';
+    transferBusy = true;
+    if (conflict === 'replace' && !await showConfirmDialog({ title: 'Replace existing items?', message: 'Existing files or entire folders with the same name will be moved to Trash before replacement. Folders are not merged.', confirmText: 'Replace' })) {
+        transferBusy = false;
+        return;
+    }
+    document.getElementById('transferSubmit').disabled = true;
+    document.getElementById('transferSubmit').textContent = 'Working…';
     try {
-        const result = await api('/api/move', {
+        const result = await api('/api/transfer', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ items })
+            body: JSON.stringify({ items, action: transfer.action, conflict })
         });
-        closeMoveModal();
-        showToast(`Moved ${result.moved.length} item(s)`, 'success');
-        refreshFiles();
+        const completed = result.completed || result.moved || [];
+        const skipped = result.skipped || [];
+        const retained = [...result.errors.map(error => error.source), ...skipped.map(item => item.source)];
+        pendingTransfer = { paths: retained, action: transfer.action };
+        if (fileClipboard && transfer.action === 'move') {
+            const done = new Set(completed.map(item => item.source));
+            fileClipboard.paths = fileClipboard.paths.filter(path => !done.has(path));
+        }
+        transferBusy = false;
+        if (result.errors.length === 0) closeMoveModal();
+        await refreshWithFailedSelection(retained);
+        const verb = transfer.action === 'copy' ? 'Copied' : 'Moved';
+        if (result.errors.length) reportOperationResult(verb, completed.length, result.errors);
+        else showToast(`${verb} ${completed.length} item(s)${skipped.length ? `; ${skipped.length} skipped (already exist)` : ''}`, skipped.length ? 'info' : 'success');
     } catch (err) {
         showToast(err.message, 'error');
+    } finally {
+        transferBusy = false;
+        document.getElementById('transferSubmit').disabled = false;
+        document.getElementById('transferSubmit').textContent = transfer.action === 'copy' ? 'Copy Here' : 'Move Here';
     }
 }
+
+function setFileClipboard(action) {
+    if (!selectedFiles.size) return showToast('Select files or folders first', 'info');
+    fileClipboard = { action, paths: Array.from(selectedFiles) };
+    updateToolbar();
+    showToast(`${fileClipboard.paths.length} item(s) ready to ${action === 'copy' ? 'copy' : 'move'}. Open the destination folder and choose Paste.`, 'info');
+}
+
+function pasteFiles() {
+    if (!fileClipboard || !fileClipboard.paths.length) return showToast('Copy or cut some items first', 'info');
+    return showMoveModal(true);
+}
+
+async function duplicateSelected() {
+    if (transferBusy) return;
+    if (!selectedFiles.size) return showToast('Select files or folders first', 'info');
+    transferBusy = true;
+    const paths = Array.from(selectedFiles);
+    try {
+        const result = await api('/api/transfer', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'copy', conflict: 'keep_both',
+                items: paths.map(source => ({ source, destination: source })) })
+        });
+        await refreshWithFailedSelection(result.errors.map(error => error.source));
+        reportOperationResult('Duplicated', result.completed.length, result.errors);
+    } catch (err) {
+        showToast(err.message, 'error');
+    } finally {
+        transferBusy = false;
+    }
+}
+
+function browseSelectedArchive() {
+    if (selectedFiles.size !== 1) return showToast('Select one ZIP file first', 'info');
+    return browseArchive(Array.from(selectedFiles)[0]);
+}
+
+async function browseArchive(path) {
+    if (archiveBusy) return;
+    archiveBusy = true;
+    archivePath = null;
+    archiveEntries = [];
+    document.getElementById('archiveModal').classList.remove('hidden');
+    document.getElementById('archiveTitle').textContent = path.split('/').pop();
+    document.getElementById('archiveEntries').textContent = 'Loading ZIP contents…';
+    document.getElementById('archiveStatus').textContent = '';
+    document.getElementById('extractSubmit').disabled = true;
+    document.getElementById('archiveSelectAll').checked = true;
+    document.getElementById('archiveDestination').value = path.replace(/\.zip$/i, '') + ' extracted';
+    try {
+        const result = await api(`/api/archive?path=${encodeURIComponent(path)}`);
+        archivePath = path;
+        archiveEntries = result.entries;
+        document.getElementById('archiveEntries').innerHTML = archiveEntries.map((entry, index) =>
+            `<label class="flex items-start gap-2 text-sm text-gray-200 py-1"><input class="archive-entry mt-1" type="checkbox" data-index="${index}" checked onchange="updateArchiveSelection()"><span class="break-all">${escapeHtml(entry.path)}${entry.isDirectory ? '' : ` (${escapeHtml(formatSize(entry.size))})`}</span></label>`
+        ).join('') || '<p class="text-gray-400">Empty ZIP archive</p>';
+        document.getElementById('archiveStatus').textContent = `${archiveEntries.length} entries. Extracts into a new folder; existing folders are preserved.`;
+        document.getElementById('extractSubmit').disabled = archiveEntries.length === 0;
+    } catch (err) {
+        document.getElementById('archiveEntries').textContent = err.message;
+        showToast(err.message, 'error');
+    } finally {
+        archiveBusy = false;
+    }
+}
+
+function closeArchiveModal() {
+    if (!archiveBusy) document.getElementById('archiveModal').classList.add('hidden');
+}
+
+function selectArchiveEntries(checked) {
+    document.querySelectorAll('.archive-entry').forEach(input => { input.checked = checked; });
+    updateArchiveSelection();
+}
+
+function updateArchiveSelection() {
+    const inputs = Array.from(document.querySelectorAll('.archive-entry'));
+    const selected = inputs.filter(input => input.checked).length;
+    document.getElementById('archiveSelectAll').checked = inputs.length > 0 && selected === inputs.length;
+    document.getElementById('archiveSelectAll').indeterminate = selected > 0 && selected < inputs.length;
+}
+
+async function extractArchive() {
+    if (archiveBusy || !archivePath) return;
+    const members = Array.from(document.querySelectorAll('.archive-entry'))
+        .filter(input => input.checked).map(input => archiveEntries[Number(input.dataset.index)].path);
+    if (!members.length) return showToast('Select at least one entry', 'info');
+    const destination = document.getElementById('archiveDestination').value.trim();
+    if (!destination) return showToast('Enter a new destination folder', 'info');
+    archiveBusy = true;
+    document.getElementById('extractSubmit').disabled = true;
+    document.getElementById('archiveStatus').textContent = 'Extracting…';
+    try {
+        const result = await api('/api/archive/extract', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ path: archivePath, destination, members })
+        });
+        archiveBusy = false;
+        closeArchiveModal();
+        await refreshFiles();
+        showToast(`Extracted ${result.extracted} file(s) into ${result.destination}`, 'success');
+    } catch (err) {
+        document.getElementById('archiveStatus').textContent = err.message;
+        showToast(err.message, 'error');
+    } finally {
+        archiveBusy = false;
+        document.getElementById('extractSubmit').disabled = false;
+    }
+}
+
+document.addEventListener('keydown', event => {
+    const target = event.target;
+    if (target && (target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName) || target.closest?.('.CodeMirror'))) return;
+    if (event.key === 'Escape') closeArchiveModal();
+    if (!(event.ctrlKey || event.metaKey) || event.altKey || event.shiftKey || viewMode === 'file') return;
+    const key = event.key.toLowerCase();
+    if ((key === 'c' || key === 'x') && selectedFiles.size) {
+        if (window.getSelection?.().toString()) return;
+        event.preventDefault();
+        setFileClipboard(key === 'c' ? 'copy' : 'move');
+    } else if (key === 'v' && fileClipboard?.paths.length) {
+        event.preventDefault();
+        pasteFiles();
+    }
+});
 
 // Rename
 function showRenameModal(path, currentName) {
@@ -2028,6 +2295,7 @@ async function performSearch(pushHistory = true) {
         showToast('Enter a search term', 'error');
         return;
     }
+    if (!await allowNavigation()) return;
 
     try {
         const params = new URLSearchParams({
@@ -2040,8 +2308,8 @@ async function performSearch(pushHistory = true) {
 
         // Update URL with search query
         if (pushHistory) {
-            const newUrl = '/' + (currentPath || '') + '?q=' + encodeURIComponent(query);
-            history.pushState({ type: 'search', query, path: currentPath }, '', newUrl);
+            const newUrl = fileUrlPath(currentPath || '') + '?q=' + encodeURIComponent(query);
+            pushNavigationState({ type: 'search', query, path: currentPath }, '', newUrl);
         }
 
         renderSearchResults(data);
@@ -2092,7 +2360,7 @@ function renderSearchResults(data) {
                 contentMatchesHtml = `
                     <div class="mt-2 space-y-1">
                         ${item.contentMatches.map(m => `
-                            <div class="text-xs bg-gray-900 p-2 rounded font-mono text-gray-300 cursor-pointer hover:bg-gray-800" onclick="openSearchResultWithLine('${item.path}', ${m.line}, event)">
+                            <div class="text-xs bg-gray-900 p-2 rounded font-mono text-gray-300 cursor-pointer hover:bg-gray-800" onclick="openSearchResultWithLine(${inlineArg(item.path)}, ${m.line}, event)">
                                 <span class="text-blue-400 hover:text-blue-300">Line ${m.line}:</span> ${highlightText(m.text, data.query)}
                             </div>
                         `).join('')}
@@ -2103,7 +2371,7 @@ function renderSearchResults(data) {
             const displayName = item.nameMatch ? highlightText(item.name, data.query) : escapeHtml(item.name);
 
             return `
-                <div class="p-3 hover:bg-gray-700 cursor-pointer" onclick="openSearchResult('${item.path}', ${item.isDirectory})">
+                <div class="p-3 hover:bg-gray-700 cursor-pointer" onclick="openSearchResult(${inlineArg(item.path)}, ${item.isDirectory})">
                     <div class="flex items-center gap-2">
                         <i data-lucide="${icon}" class="w-5 h-5 ${iconColor}"></i>
                         <div class="flex-1 min-w-0">
@@ -2136,6 +2404,11 @@ function openSearchResultWithLine(path, lineNum, event) {
 }
 
 function showSearchView() {
+    editorBaseline = null;
+    currentViewingFile = null;
+    selectedFiles.clear();
+    renderBreadcrumbs();
+    updateToolbar();
     document.getElementById('fileListView').classList.add('hidden');
     document.getElementById('fileViewerView').classList.add('hidden');
     document.getElementById('searchResultsView').classList.remove('hidden');
@@ -2144,25 +2417,21 @@ function showSearchView() {
     viewMode = 'search';
 }
 
-function closeSearch(pushHistory = true) {
-    document.getElementById('searchResultsView').classList.add('hidden');
-    document.getElementById('searchInput').value = '';
-    document.getElementById('breadcrumbsBar').classList.remove('hidden');
-
-    // Update URL to remove search params
-    if (pushHistory) {
-        const newUrl = '/' + (currentPath || '');
-        history.pushState({ type: 'dir', path: currentPath }, '', newUrl);
-    }
-
-    showListView();
-    renderFiles();
+async function closeSearch(pushHistory = true) {
+    await navigateTo(currentPath, pushHistory);
 }
 
 function escapeHtml(text) {
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
+    const entities = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+    return String(text ?? '').replace(/[&<>"']/g, char => entities[char]);
+}
+
+function inlineArg(value) {
+    return escapeHtml(JSON.stringify(value));
+}
+
+function fileUrlPath(path) {
+    return '/' + path.split('/').map(encodeURIComponent).join('/');
 }
 
 function highlightText(text, query) {
@@ -2274,55 +2543,45 @@ document.addEventListener('dragover', (e) => {
     e.preventDefault();
 });
 
+async function collectDroppedEntries(entries) {
+    const files = [];
+    async function processEntry(entry, path = '') {
+        if (entry.isFile) {
+            const file = await new Promise((resolve, reject) => entry.file(resolve, reject));
+            files.push({ file, path: path ? `${path}/${file.name}` : file.name });
+        } else if (entry.isDirectory) {
+            const reader = entry.createReader();
+            const folderPath = path ? `${path}/${entry.name}` : entry.name;
+            // readEntries returns batches (often only 100 entries). An empty batch
+            // is the only indication that the entire directory has been read.
+            while (true) {
+                const batch = await new Promise((resolve, reject) => reader.readEntries(resolve, reject));
+                if (batch.length === 0) break;
+                for (const child of batch) await processEntry(child, folderPath);
+            }
+        }
+    }
+    for (const entry of entries) await processEntry(entry);
+    return files;
+}
+
 document.addEventListener('drop', async (e) => {
     e.preventDefault();
     dragCounter = 0;
     document.getElementById('dropZone').classList.add('hidden');
-
-    const items = e.dataTransfer.items;
-    const files = [];
-
-    // Process all items (including folders)
-    const processEntry = async (entry, path = '') => {
-        if (entry.isFile) {
-            return new Promise((resolve) => {
-                entry.file((file) => {
-                    // Preserve folder structure in file path
-                    const filePath = path ? `${path}/${file.name}` : file.name;
-                    files.push({ file, path: filePath });
-                    resolve();
-                });
-            });
-        } else if (entry.isDirectory) {
-            const reader = entry.createReader();
-            const entries = await new Promise((resolve) => {
-                reader.readEntries(resolve);
-            });
-            const folderPath = path ? `${path}/${entry.name}` : entry.name;
-            for (const childEntry of entries) {
-                await processEntry(childEntry, folderPath);
-            }
+    try {
+        const entries = Array.from(e.dataTransfer.items || [])
+            .map(item => item.webkitGetAsEntry ? item.webkitGetAsEntry() : null)
+            .filter(Boolean);
+        if (entries.length > 0) {
+            const files = await collectDroppedEntries(entries);
+            if (files.length > 0) await uploadDroppedFiles(files);
+        } else if (e.dataTransfer.files.length > 0) {
+            await uploadFiles(e.dataTransfer.files);
         }
-    };
-
-    // Get all entries
-    const entries = [];
-    for (let i = 0; i < items.length; i++) {
-        const entry = items[i].webkitGetAsEntry();
-        if (entry) {
-            entries.push(entry);
-        }
+    } catch (err) {
+        showToast('Could not read dropped files: ' + err.message, 'error');
     }
-
-    // Process entries
-    for (const entry of entries) {
-        await processEntry(entry);
-    }
-
-    if (files.length === 0) return;
-
-    // Upload files
-    await uploadDroppedFiles(files);
 });
 
 async function uploadDroppedFiles(droppedFiles) {
@@ -2355,8 +2614,9 @@ async function uploadDroppedFiles(droppedFiles) {
                     isFolder: true
                 })
             });
-        } catch (e) {
-            // Directory might already exist, ignore
+        } catch (error) {
+            const existing = await api(`/api/files?path=${encodeURIComponent(parent ? `${parent}/${name}` : name)}`).catch(() => null);
+            if (!existing) throw error;
         }
     }
 
@@ -2429,7 +2689,7 @@ function closeConfirmModal(confirmed) {
 
 // Open image viewer at index
 function openImageViewer(index) {
-    if (currentFolderImages.length === 0) return;
+    if (!Number.isInteger(index) || index < 0 || index >= currentFolderImages.length) return;
     
     currentImageIndex = index;
     const modal = document.getElementById('imageViewerModal');
@@ -2568,3 +2828,13 @@ document.addEventListener('DOMContentLoaded', () => {
     initMobileViewMode();
 });
 
+
+let lastMobileLayout = isMobile();
+window.addEventListener('resize', () => {
+    const mobile = isMobile();
+    if (mobile !== lastMobileLayout) {
+        lastMobileLayout = mobile;
+        if (viewMode === 'list') renderFiles();
+        updateToolbar();
+    }
+});

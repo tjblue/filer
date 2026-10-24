@@ -14,6 +14,11 @@ def safe_path(requested_path: str) -> Path:
     """Validate and return a safe path within ROOT_DIR."""
     ROOT_DIR = current_app.config["ROOT_DIR"]
 
+    if not isinstance(requested_path, str):
+        abort(400, "Path must be text")
+    if "\0" in requested_path:
+        abort(400, "Invalid path")
+
     if not requested_path:
         return ROOT_DIR
 

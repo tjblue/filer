@@ -111,6 +111,7 @@
 
     <script>
     let currentSettings = { theme: 'dark', fontSize: 'medium', previewScale: 'off' };
+    let settingsSaveQueue = Promise.resolve();
 
     document.addEventListener('DOMContentLoaded', async () => {
         lucide.createIcons();
@@ -165,20 +166,29 @@
         });
     }
 
-    async function setSetting(key, value) {
-        currentSettings[key] = value;
-        applySettings(currentSettings);
-        updateButtons();
-        try {
-            await fetch('/settings/api', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ [key]: value })
-            });
-            showToast('Settings saved', 'success');
-        } catch (e) {
-            showToast('Failed to save settings', 'error');
-        }
+    function setSetting(key, value) {
+        // Serialize quick successive changes and apply only confirmed saves.
+        settingsSaveQueue = settingsSaveQueue.then(async () => {
+            try {
+                const response = await fetch('/settings/api', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ [key]: value })
+                });
+                const data = await response.json().catch(() => ({}));
+                if (!response.ok) throw new Error(data.error || `Save failed (${response.status})`);
+                if (!data || typeof data.theme !== 'string' || typeof data.fontSize !== 'string' || typeof data.previewScale !== 'string') {
+                    throw new Error('Invalid settings response');
+                }
+                currentSettings = data;
+                applySettings(currentSettings);
+                updateButtons();
+                showToast('Settings saved', 'success');
+            } catch (error) {
+                showToast(error.message || 'Failed to save settings', 'error');
+            }
+        });
+        return settingsSaveQueue;
     }
 
     // Toast

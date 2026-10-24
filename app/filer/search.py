@@ -18,17 +18,21 @@ def search_with_ripgrep(query: str, search_path: Path, max_results: int) -> list
         # Run ripgrep with JSON output
         result = subprocess.run(
             [
-                'rg', '--json', '-i',         # JSON output, case-insensitive
+                'rg', '--json', '-i', '-F',   # Literal, case-insensitive search
                 '--max-count', '3',           # Max 3 matches per file
                 '--max-filesize', '10M',      # Skip files over 10MB
+                '--no-ignore',               # Match the Python fallback's scope
                 '-g', '!.*',                  # Skip hidden files
-                query, str(search_path)
+                '--', query, str(search_path)
             ],
             capture_output=True, text=True, timeout=30
         )
     except FileNotFoundError:
         return None  # ripgrep not installed
     except subprocess.TimeoutExpired:
+        return None
+
+    if result.returncode not in (0, 1):
         return None
 
     results = []

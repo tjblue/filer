@@ -2,44 +2,37 @@
 Trash background cleanup thread for expired items.
 """
 
-import os
 import time
-import shutil
 import threading
-from app.config import TRASH_FOLDER
 from app.trash.service import (
+    trash_metadata_lock,
     trash_load_metadata,
-    trash_save_metadata,
+    trash_delete_permanently,
     trash_is_expired
 )
 
 
+@trash_metadata_lock
+def trash_cleanup_once():
+    """Keep failed deletions tracked so later cleanup passes can retry them."""
+    metadata = trash_load_metadata()
+    removed = 0
+    for trash_id, item in metadata['items'].items():
+        if trash_is_expired(item):
+            result = trash_delete_permanently(trash_id)
+            if result['success']:
+                removed += 1
+    return removed
+
+
 def trash_cleanup_expired():
-    """Background thread to clean up expired trash items"""
+    """Background worker for expired trash items."""
     while True:
-        time.sleep(300)  # Check every 5 minutes
-
+        time.sleep(300)
         try:
-            metadata = trash_load_metadata()
-            expired_ids = []
-
-            for trash_id, item in metadata['items'].items():
-                if trash_is_expired(item):
-                    expired_ids.append(trash_id)
-
-                    # Delete storage directory
-                    storage_dir = os.path.join(TRASH_FOLDER, trash_id)
-                    if os.path.exists(storage_dir):
-                        try:
-                            shutil.rmtree(storage_dir)
-                        except OSError:
-                            pass
-
-            if expired_ids:
-                for trash_id in expired_ids:
-                    del metadata['items'][trash_id]
-                trash_save_metadata(metadata)
-                print(f"[Trash Cleanup] Removed {len(expired_ids)} expired items")
+            removed = trash_cleanup_once()
+            if removed:
+                print(f"[Trash Cleanup] Removed {removed} expired items")
         except Exception as e:
             print(f"[Trash Cleanup Error] {e}")
 

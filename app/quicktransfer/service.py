@@ -6,12 +6,12 @@ import os
 import json
 import uuid
 import socket
-import threading
+from app.storage import MetadataLock, save_json
 from datetime import datetime, timedelta
 from app.config import QT_UPLOAD_FOLDER, QT_METADATA_FILE
 
 # Thread lock for metadata file access
-qt_metadata_lock = threading.Lock()
+qt_metadata_lock = MetadataLock(lambda: QT_METADATA_FILE)
 
 
 def qt_ensure_directories():
@@ -22,7 +22,7 @@ def qt_ensure_directories():
 
 def qt_load_metadata():
     """Load Quick Transfer metadata from JSON file"""
-    with qt_metadata_lock:
+    with qt_metadata_lock.transaction():
         if os.path.exists(QT_METADATA_FILE):
             try:
                 with open(QT_METADATA_FILE, 'r', encoding='utf-8') as f:
@@ -34,9 +34,8 @@ def qt_load_metadata():
 
 def qt_save_metadata(data):
     """Save Quick Transfer metadata to JSON file"""
-    with qt_metadata_lock:
-        with open(QT_METADATA_FILE, 'w', encoding='utf-8') as f:
-            json.dump(data, f, indent=2)
+    with qt_metadata_lock.transaction():
+        save_json(QT_METADATA_FILE, data)
 
 
 def qt_generate_id():
@@ -82,6 +81,7 @@ def qt_is_expired(item):
     return datetime.now() > expires_at
 
 
+@qt_metadata_lock
 def qt_get_item(item_id):
     """Get item by ID, returning None if not found or expired"""
     metadata = qt_load_metadata()
@@ -94,6 +94,7 @@ def qt_get_item(item_id):
     return item
 
 
+@qt_metadata_lock
 def qt_delete_item(item_id):
     """Remove item from storage"""
     metadata = qt_load_metadata()

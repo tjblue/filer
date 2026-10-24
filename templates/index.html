@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <title>Filer</title>
@@ -38,7 +38,7 @@
         <!-- Header -->
         <div class="bg-gray-800 rounded-lg shadow-sm border border-gray-700 p-2 md:p-4 mb-4">
             <div class="flex flex-col md:flex-row md:items-center justify-between gap-2 md:gap-4">
-                <div class="flex items-center gap-4 flex-wrap">
+                <div class="file-header-main flex items-center gap-4 flex-wrap">
                     <h1 class="text-xl font-semibold text-gray-100 flex items-center gap-2">
                         <i data-lucide="folder-open" class="w-6 h-6 text-blue-400"></i>
                         Filer
@@ -48,11 +48,11 @@
                         <i data-lucide="plus" class="w-5 h-5"></i> Actions
                     </button>
                     <!-- View Toggle (Mobile Only) -->
-                    <button onclick="toggleMobileViewMode()" id="viewToggleBtn" class="px-3 py-2 bg-gray-700 text-gray-200 text-sm rounded-lg shadow hover:bg-gray-600 border border-gray-600 flex items-center gap-2">
+                    <button onclick="toggleMobileViewMode()" id="viewToggleBtn" aria-label="Switch to list view" title="Switch to list view" class="px-3 py-2 bg-gray-700 text-gray-200 text-sm rounded-lg shadow hover:bg-gray-600 border border-gray-600 flex items-center gap-2">
                         <i id="viewToggleIcon" data-lucide="layout-grid" class="w-5 h-5"></i>
                     </button>
                     <!-- Photo Mode Toggle (Mobile Only) -->
-                    <button onclick="togglePhotoMode()" id="photoModeBtn" class="px-3 py-2 bg-gray-700 text-gray-200 text-sm rounded-lg shadow hover:bg-gray-600 border border-gray-600 flex items-center gap-2">
+                    <button onclick="togglePhotoMode()" id="photoModeBtn" aria-label="Show photos only" aria-pressed="false" title="Show photos only" class="px-3 py-2 bg-gray-700 text-gray-200 text-sm rounded-lg shadow hover:bg-gray-600 border border-gray-600 flex items-center gap-2">
                         <i id="photoModeIcon" data-lucide="images" class="w-5 h-5"></i>
                     </button>
 
@@ -69,6 +69,8 @@
                     </button>
                     <input type="file" id="uploadInput" multiple class="hidden" onchange="uploadFiles(this.files)">
                     <!-- Selection actions (shown when files selected) -->
+                    <button onclick="setFileClipboard('copy')" id="copyBtn" title="Copy selected files" class="hidden px-3 py-1.5 bg-gray-700 text-gray-200 text-sm rounded-full items-center gap-2 border border-gray-600">Copy</button>
+                    <button onclick="pasteFiles()" id="pasteBtn" class="hidden px-3 py-1.5 bg-gray-700 text-gray-200 text-sm rounded-full items-center gap-2 border border-gray-600">Paste</button>
                     <button onclick="showMoveModal()" id="moveBtn" class="hidden px-3 py-1.5 bg-gray-700 text-gray-200 text-sm rounded-full shadow hover:bg-gray-600 hover:shadow-lg transition-all duration-200 items-center gap-2 border border-gray-600">
                         <i data-lucide="move" class="w-4 h-4 text-purple-400"></i> <span class="hidden sm:inline">Move</span>
                     </button>
@@ -84,6 +86,9 @@
                             <i data-lucide="chevron-down" class="w-4 h-4"></i> <span class="hidden sm:inline">More</span>
                         </button>
                         <div id="moreMenu" class="hidden absolute left-0 top-full mt-1 bg-gray-800 border border-gray-600 rounded-lg shadow-xl z-50 py-1 min-w-[160px]">
+                            <button onclick="closeMoreMenu(); setFileClipboard('move')" class="block w-full text-left px-4 py-2 text-sm text-gray-200 hover:bg-gray-700">Cut selected</button>
+                            <button onclick="closeMoreMenu(); duplicateSelected()" class="block w-full text-left px-4 py-2 text-sm text-gray-200 hover:bg-gray-700">Duplicate selected</button>
+                            <button onclick="closeMoreMenu(); browseSelectedArchive()" class="block w-full text-left px-4 py-2 text-sm text-gray-200 hover:bg-gray-700">Browse / extract ZIP</button>
                             <a href="/napkins/" class="flex items-center gap-2 px-4 py-2 text-sm text-gray-200 hover:bg-gray-700 no-underline">
                                 <i data-lucide="shredder" class="w-4 h-4 text-blue-400"></i> Napkins
                             </a>
@@ -118,10 +123,30 @@
             </div>
         </div>
 
+        <div id="photoModeNotice" class="hidden mb-3 text-sm text-gray-300 items-center justify-between gap-2">
+            <span>Showing photos and folders</span>
+            <button onclick="togglePhotoMode()" class="text-blue-400 px-2">Show all files</button>
+        </div>
+
         <!-- File List View -->
         <div id="fileListView">
+            <div id="mobileSelectionBar" class="hidden mb-3 bg-gray-800 border border-gray-700 rounded-lg p-2" role="region" aria-label="Selected file actions">
+                <div class="flex items-center justify-between gap-2">
+                    <span id="mobileSelectionCount" class="text-sm text-gray-100 px-2" aria-live="polite">0 selected</span>
+                    <div class="flex gap-1">
+                        <button onclick="selectAllFiles()" class="px-2 text-sm text-blue-400">Select all</button>
+                        <button onclick="clearSelection()" class="px-2 text-sm text-gray-300">Clear</button>
+                    </div>
+                </div>
+                <div class="flex flex-wrap gap-2 mt-1">
+                    <button onclick="setFileClipboard('copy')" class="flex-1 px-2 bg-gray-700 text-gray-100 rounded text-sm">Copy</button>
+                    <button onclick="showMoveModal()" class="flex-1 px-2 bg-gray-700 text-gray-100 rounded text-sm">Move</button>
+                    <button onclick="downloadSelectedAsZip()" class="flex-1 px-2 bg-gray-700 text-gray-100 rounded text-sm">Download ZIP</button>
+                    <button onclick="deleteSelected()" class="flex-1 px-2 bg-red-600 text-white rounded text-sm">Delete</button>
+                </div>
+            </div>
             <div class="bg-gray-800 rounded-lg shadow-sm border border-gray-700 overflow-hidden">
-                <table class="w-full">
+                <table class="file-table w-full">
                     <thead class="bg-gray-750 border-b border-gray-700" style="background-color: rgb(42 48 60);">
                         <tr>
                             <th class="w-10 p-3">
@@ -177,7 +202,7 @@
         <div id="fileViewerView" class="hidden">
             <div class="bg-gray-800 rounded-lg shadow-sm border border-gray-700 overflow-hidden">
                 <!-- File Viewer Header -->
-                <div class="flex items-center justify-between p-4 border-b border-gray-700" style="background-color: rgb(42 48 60);">
+                <div class="file-viewer-header flex items-center justify-between p-4 border-b border-gray-700" style="background-color: rgb(42 48 60);">
                     <div class="flex items-center gap-3">
                         <button onclick="goToParentFolder()" class="p-2 hover:bg-gray-700 rounded" title="Back to folder">
                             <i data-lucide="arrow-left" class="w-5 h-5 text-gray-300"></i>
@@ -243,17 +268,24 @@
     <div id="moveModal" class="fixed inset-0 hidden z-50 flex items-center justify-center">
         <div class="modal-backdrop absolute inset-0" onclick="closeMoveModal()"></div>
         <div class="relative bg-gray-800 border border-gray-700 rounded-lg shadow-xl p-6 w-[450px]">
-            <h2 class="font-medium text-gray-100 mb-4">Move to...</h2>
+            <h2 id="transferTitle" class="font-medium text-gray-100 mb-4">Move to...</h2>
             <div id="folderTree" class="bg-gray-900 border border-gray-700 rounded p-3 mb-4 max-h-80 overflow-y-auto">
                 <div class="text-gray-400 text-sm">Loading folders...</div>
             </div>
-            <div class="flex items-center justify-between">
+            <label class="block text-sm text-gray-300 mb-4">If an item already exists (applies to all conflicts)
+                <select id="transferConflict" class="block w-full mt-2 p-2 bg-gray-900 border border-gray-600 rounded">
+                    <option value="skip">Skip existing items</option>
+                    <option value="keep_both">Keep both (add a number)</option>
+                    <option value="replace">Replace entire item (previous item goes to Trash)</option>
+                </select>
+            </label>
+            <div class="flex flex-wrap gap-3 items-center justify-between">
                 <div class="text-sm text-gray-400">
                     Selected: <span id="moveDestinationDisplay" class="text-blue-400">Root</span>
                 </div>
                 <div class="flex gap-2">
                     <button onclick="closeMoveModal()" class="px-4 py-2 bg-gray-700 text-gray-200 text-sm rounded hover:bg-gray-600">Cancel</button>
-                    <button onclick="moveSelected()" class="px-4 py-2 bg-purple-600 text-white text-sm rounded hover:bg-purple-700">Move Here</button>
+                    <button id="transferSubmit" onclick="moveSelected()" class="px-4 py-2 bg-purple-600 text-white text-sm rounded hover:bg-purple-700">Move Here</button>
                 </div>
             </div>
         </div>
@@ -299,8 +331,9 @@
         </div>
     </div>
 
-    <!-- Download Progress Box (bottom-right, non-blocking) -->
-    <div id="downloadProgressBox" class="fixed bottom-4 left-4 hidden z-50 bg-gray-800 border border-gray-700 rounded-lg shadow-xl p-4 w-80">
+    <div class="transfer-stack" aria-live="polite">
+    <!-- Download Progress -->
+    <div id="downloadProgressBox" class="transfer-panel fixed bottom-4 left-4 hidden z-50 bg-gray-800 border border-gray-700 rounded-lg shadow-xl p-4 w-80">
         <div class="flex items-center justify-between mb-2">
             <span class="text-sm font-medium text-gray-100 truncate pr-2" id="downloadFileName" title="">Downloading...</span>
             <button onclick="cancelActiveDownload()" class="p-1 hover:bg-gray-700 rounded text-gray-400 hover:text-red-400 flex-shrink-0" title="Cancel download">
@@ -317,7 +350,7 @@
     </div>
 
     <!-- Upload Progress Box (bottom-right, non-blocking) -->
-    <div id="uploadProgressBox" class="fixed bottom-4 right-72 hidden z-50 bg-gray-800 border border-gray-700 rounded-lg shadow-xl p-4 w-80">
+    <div id="uploadProgressBox" class="transfer-panel fixed bottom-4 right-72 hidden z-50 bg-gray-800 border border-gray-700 rounded-lg shadow-xl p-4 w-80">
         <div class="flex items-center justify-between mb-2">
             <span class="text-sm font-medium text-gray-100 truncate pr-2" id="uploadFileName" title="">Uploading...</span>
             <button onclick="cancelActiveUpload()" class="p-1 hover:bg-gray-700 rounded text-gray-400 hover:text-red-400 flex-shrink-0" title="Cancel upload">
@@ -331,6 +364,8 @@
             <span><span id="uploadProgressPercent">0%</span> &middot; <span id="uploadSpeed">0 B/s</span></span>
             <span id="uploadProgressSize">0 B / 0 B</span>
         </div>
+    </div>
+
     </div>
 
     <!-- Mobile Menu Modal -->
@@ -351,6 +386,11 @@
             <button onclick="toggleMobileMenu(); document.getElementById('uploadInput').click()" class="mobile-menu-item">
                 <i data-lucide="upload" class="w-5 h-5 text-green-400"></i> Upload
             </button>
+            <button onclick="toggleMobileMenu(); setFileClipboard('copy')" class="mobile-menu-item">Copy selected</button>
+            <button onclick="toggleMobileMenu(); setFileClipboard('move')" class="mobile-menu-item">Cut selected</button>
+            <button onclick="toggleMobileMenu(); pasteFiles()" class="mobile-menu-item">Paste</button>
+            <button onclick="toggleMobileMenu(); duplicateSelected()" class="mobile-menu-item">Duplicate selected</button>
+            <button onclick="toggleMobileMenu(); browseSelectedArchive()" class="mobile-menu-item">Browse / extract ZIP</button>
             <hr class="border-gray-700 my-2">
             <a href="/napkins/" class="mobile-menu-item no-underline">
                 <i data-lucide="shredder" class="w-5 h-5 text-blue-400"></i> Napkins
@@ -391,6 +431,23 @@
         </div>
     </div>
 
+    <div id="archiveModal" role="dialog" aria-modal="true" aria-labelledby="archiveTitle" class="fixed inset-0 hidden z-50 flex items-center justify-center">
+        <div class="modal-backdrop absolute inset-0" onclick="closeArchiveModal()"></div>
+        <div class="relative bg-gray-800 border border-gray-700 rounded-lg shadow-xl p-6 w-[650px] max-w-[calc(100vw-32px)] max-h-[90vh] overflow-y-auto">
+            <h2 id="archiveTitle" class="text-gray-100 font-medium mb-3">ZIP contents</h2>
+            <p class="text-gray-400 text-sm mb-3">Select entries to extract. Selecting a folder includes its contents.</p>
+            <label class="text-gray-200 text-sm"><input id="archiveSelectAll" type="checkbox" checked onchange="selectArchiveEntries(this.checked)"> Select all</label>
+            <div id="archiveEntries" class="my-3 max-h-64 overflow-auto bg-gray-900 rounded p-3"></div>
+            <label class="block text-sm text-gray-300">Extract into a new folder (path from root)
+                <input id="archiveDestination" type="text" class="block w-full p-2 my-2 rounded bg-gray-900 border border-gray-600">
+            </label>
+            <p id="archiveStatus" role="status" class="text-sm text-gray-400 mb-3"></p>
+            <div class="flex gap-2 justify-end">
+                <button onclick="closeArchiveModal()" class="px-4 py-2 rounded bg-gray-700 text-gray-200">Close</button>
+                <button id="extractSubmit" onclick="extractArchive()" class="px-4 py-2 rounded bg-blue-600 text-white">Extract selected</button>
+            </div>
+        </div>
+    </div>
     <script src="/_static/app.js"></script>
 </body>
 </html>

@@ -77,6 +77,7 @@ def app(root_dir, tmp_path_factory):
 
     application = create_app(root_dir)
     application.config['TESTING'] = True
+    application.config['DATA_DIR'] = data_dir
 
     yield application
 

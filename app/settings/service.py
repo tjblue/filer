@@ -4,11 +4,11 @@ Settings service layer - handles reading/writing application settings.
 
 import os
 import json
-import threading
+from app.storage import MetadataLock, save_json
 from app.config import SETTINGS_FILE
 
 # Thread lock for settings file access
-settings_lock = threading.Lock()
+settings_lock = MetadataLock(lambda: SETTINGS_FILE)
 
 DEFAULT_SETTINGS = {
     "theme": "dark",
@@ -24,7 +24,7 @@ def settings_ensure_directory():
 
 def settings_load():
     """Load settings from JSON file."""
-    with settings_lock:
+    with settings_lock.transaction():
         if os.path.exists(SETTINGS_FILE):
             try:
                 with open(SETTINGS_FILE, 'r', encoding='utf-8') as f:
@@ -37,6 +37,5 @@ def settings_load():
 def settings_save(data):
     """Save settings to JSON file."""
     settings_ensure_directory()
-    with settings_lock:
-        with open(SETTINGS_FILE, 'w', encoding='utf-8') as f:
-            json.dump(data, f, indent=2)
+    with settings_lock.transaction():
+        save_json(SETTINGS_FILE, data)

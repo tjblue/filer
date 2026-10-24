@@ -1,6 +1,7 @@
 """Tests for Quick Transfer routes and service."""
 
 import io
+import pytest
 from datetime import datetime, timedelta
 
 from app.quicktransfer.service import (
@@ -9,6 +10,17 @@ from app.quicktransfer.service import (
     qt_format_time_remaining,
     qt_is_expired,
 )
+
+
+@pytest.mark.parametrize('limit,label', [(5120, '5 GiB'), (256, '256 MiB')])
+def test_napkins_loads_shared_theme_and_displays_configured_limit(client, monkeypatch, limit, label):
+    monkeypatch.setattr('app.quicktransfer.routes.MAX_FILE_SIZE_MB', limit)
+    response = client.get('/napkins/')
+    assert response.status_code == 200
+    page = response.get_data(as_text=True)
+    assert 'href="/_static/style.css"' in page
+    assert f'Maximum file size: {label}' in page
+    assert '100MB' not in page
 
 
 class TestQTServiceFunctions:

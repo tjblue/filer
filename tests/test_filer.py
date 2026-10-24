@@ -202,7 +202,7 @@ class TestZip:
         with zipfile.ZipFile(io.BytesIO(resp.data)) as zf:
             names = zf.namelist()
             assert "file.txt" in names
-            assert "nested.txt" in names
+            assert "subdir/nested.txt" in names
 
 
 class TestFolders:

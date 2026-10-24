@@ -13,12 +13,23 @@ from app.trash.service import trash_ensure_directories
 from app.trash.cleanup import start_trash_cleanup_thread
 
 
-if __name__ == '__main__':
+def parse_args(argv=None):
     parser = argparse.ArgumentParser(description='Filer - A simple file server')
     parser.add_argument('--root', '-r', default='.', help='Root directory to serve (default: current directory)')
     parser.add_argument('--port', '-p', type=int, default=5000, help='Port to run on (default: 5000)')
-    parser.add_argument('--host', '-H', default='0.0.0.0', help='Host to bind to (default: 127.0.0.1)')
-    args = parser.parse_args()
+    parser.add_argument('--host', '-H', default='127.0.0.1', help='Host to bind to (default: 127.0.0.1)')
+    parser.add_argument('--debug', action='store_true', help='Enable the development debugger (localhost only)')
+    parser.add_argument('--production', action='store_true', help='Serve with Waitress instead of the development server')
+    args = parser.parse_args(argv)
+    if args.debug and args.host not in ('127.0.0.1', 'localhost', '::1'):
+        parser.error('--debug requires a localhost binding')
+    if args.debug and args.production:
+        parser.error('--debug cannot be combined with --production')
+    return args
+
+
+if __name__ == '__main__':
+    args = parse_args()
 
     ROOT_DIR = Path(args.root).resolve()
 
@@ -41,4 +52,8 @@ if __name__ == '__main__':
     print(f"Server running at: http://{args.host}:{args.port}")
     print(f"Napkins available at: http://{args.host}:{args.port}/napkins/")
 
-    app.run(host=args.host, port=args.port, debug=True)
+    if args.production:
+        from waitress import serve
+        serve(app, host=args.host, port=args.port, max_request_body_size=app.config["MAX_CONTENT_LENGTH"])
+    else:
+        app.run(host=args.host, port=args.port, debug=args.debug)

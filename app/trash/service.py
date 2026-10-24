@@ -6,13 +6,13 @@ import os
 import json
 import uuid
 import shutil
-import threading
+from app.storage import MetadataLock, save_json
 from datetime import datetime, timedelta
 from pathlib import Path
 from app.config import TRASH_FOLDER, TRASH_METADATA_FILE, TRASH_RETENTION_DAYS
 
 # Thread lock for metadata file access
-trash_metadata_lock = threading.Lock()
+trash_metadata_lock = MetadataLock(lambda: TRASH_METADATA_FILE)
 
 
 def trash_ensure_directories():
@@ -23,7 +23,7 @@ def trash_ensure_directories():
 
 def trash_load_metadata():
     """Load Trash metadata from JSON file"""
-    with trash_metadata_lock:
+    with trash_metadata_lock.transaction():
         if os.path.exists(TRASH_METADATA_FILE):
             try:
                 with open(TRASH_METADATA_FILE, 'r', encoding='utf-8') as f:
@@ -35,9 +35,8 @@ def trash_load_metadata():
 
 def trash_save_metadata(data):
     """Save Trash metadata to JSON file"""
-    with trash_metadata_lock:
-        with open(TRASH_METADATA_FILE, 'w', encoding='utf-8') as f:
-            json.dump(data, f, indent=2)
+    with trash_metadata_lock.transaction():
+        save_json(TRASH_METADATA_FILE, data)
 
 
 def trash_generate_id():
@@ -104,6 +103,7 @@ def trash_get_size(path):
     return 0
 
 
+@trash_metadata_lock
 def trash_move_to_trash(path, root_dir):
     """
     Move a file or folder to trash.
@@ -115,7 +115,11 @@ def trash_move_to_trash(path, root_dir):
     Returns:
         dict with trash_id and metadata, or None on failure
     """
-    full_path = root_dir / path
+    root_dir = Path(root_dir).resolve()
+    full_path = (root_dir / path).resolve()
+    if not full_path.is_relative_to(root_dir) or full_path == root_dir:
+        raise ValueError("Cannot trash paths outside the root or the root itself")
+    path = full_path.relative_to(root_dir).as_posix()
 
     if not full_path.exists():
         return None
@@ -145,6 +149,7 @@ def trash_move_to_trash(path, root_dir):
     item_metadata = {
         "trash_id": trash_id,
         "original_path": path,
+        "original_root": str(root_dir),
         "name": name,
         "is_directory": is_directory,
         "size": size,
@@ -154,11 +159,18 @@ def trash_move_to_trash(path, root_dir):
     # Save to metadata file
     metadata = trash_load_metadata()
     metadata['items'][trash_id] = item_metadata
-    trash_save_metadata(metadata)
+    try:
+        trash_save_metadata(metadata)
+    except OSError:
+        # Metadata failure must not strand an untracked file in Trash.
+        shutil.move(dest_path, str(full_path))
+        os.rmdir(storage_dir)
+        raise
 
     return item_metadata
 
 
+@trash_metadata_lock
 def trash_restore(trash_id, root_dir):
     """
     Restore an item from trash to its original location.
@@ -176,6 +188,13 @@ def trash_restore(trash_id, root_dir):
     if not item:
         return {"success": False, "error": "Item not found in trash"}
 
+    root_dir = Path(root_dir).resolve()
+    original_root = item.get("original_root")
+    if not original_root:
+        return {"success": False, "error": "Original root is unknown for this legacy item; recover it manually from trash storage"}
+    if root_dir != Path(original_root).resolve():
+        return {"success": False, "error": f"Restore requires the original root: {original_root}"}
+
     # Check if item still exists in trash storage
     storage_path = os.path.join(TRASH_FOLDER, trash_id, item['name'])
     if not os.path.exists(storage_path):
@@ -185,7 +204,10 @@ def trash_restore(trash_id, root_dir):
         return {"success": False, "error": "Item no longer exists in trash storage"}
 
     # Check if original location is available
-    dest_path = root_dir / item['original_path']
+    root_dir = Path(root_dir).resolve()
+    dest_path = (root_dir / item['original_path']).resolve()
+    if not dest_path.is_relative_to(root_dir) or dest_path == root_dir:
+        return {"success": False, "error": "Restore destination is outside the root"}
     if dest_path.exists():
         return {"success": False, "error": f"Cannot restore: '{item['original_path']}' already exists"}
 
@@ -212,6 +234,7 @@ def trash_restore(trash_id, root_dir):
     return {"success": True, "restored_path": item['original_path']}
 
 
+@trash_metadata_lock
 def trash_delete_permanently(trash_id):
     """
     Permanently delete an item from trash.
@@ -258,6 +281,7 @@ def trash_list_items():
             "trash_id": item['trash_id'],
             "name": item['name'],
             "original_path": item['original_path'],
+            "original_root": item.get('original_root'),
             "is_directory": item['is_directory'],
             "size": item['size'],
             "size_formatted": trash_format_size(item['size']),
@@ -272,6 +296,7 @@ def trash_list_items():
     return items
 
 
+@trash_metadata_lock
 def trash_empty_all():
     """
     Empty entire trash - permanently delete all items.
@@ -280,19 +305,12 @@ def trash_empty_all():
         dict with count of deleted items
     """
     metadata = trash_load_metadata()
-    count = len(metadata['items'])
-
-    # Delete all storage directories
-    for trash_id in list(metadata['items'].keys()):
-        storage_dir = os.path.join(TRASH_FOLDER, trash_id)
-        if os.path.exists(storage_dir):
-            try:
-                shutil.rmtree(storage_dir)
-            except OSError:
-                pass
-
-    # Clear metadata
-    metadata['items'] = {}
-    trash_save_metadata(metadata)
-
-    return {"success": True, "deleted_count": count}
+    count = 0
+    errors = []
+    for trash_id in list(metadata['items']):
+        result = trash_delete_permanently(trash_id)
+        if result['success']:
+            count += 1
+        else:
+            errors.append({"id": trash_id, "error": result['error']})
+    return {"success": not errors, "deleted_count": count, "errors": errors}

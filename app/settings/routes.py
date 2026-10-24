@@ -2,8 +2,9 @@
 Settings HTTP routes - application settings management.
 """
 
-from flask import Blueprint, render_template, request, jsonify
-from app.settings.service import settings_load, settings_save, DEFAULT_SETTINGS
+from flask import Blueprint, render_template, request, jsonify, abort
+from app.filesystem import json_object
+from app.settings.service import settings_load, settings_save, DEFAULT_SETTINGS, settings_lock
 
 bp = Blueprint('settings', __name__, url_prefix='/settings')
 
@@ -21,9 +22,14 @@ def get_settings():
 
 
 @bp.route('/api', methods=['POST'])
+@settings_lock
 def save_settings():
     """Save settings and return updated values."""
-    data = request.get_json()
+    data = json_object(request)
+    allowed = {"theme": {"dark", "light"}, "fontSize": {"sm", "medium", "lg"}, "previewScale": {"off", "sm", "md", "lg"}}
+    for key, choices in allowed.items():
+        if key in data and (not isinstance(data[key], str) or data[key] not in choices):
+            abort(400, f"Invalid value for {key}")
     current = settings_load()
 
     # Only allow known keys

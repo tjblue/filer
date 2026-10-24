@@ -3,6 +3,9 @@ __pycache__/
 *.py[cod]
 data/metadata.json
 data/trash_metadata.json
+data/*.lock
+data/upload_sessions/
+data/archives/
 *.bak
 *.log
 .env

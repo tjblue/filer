@@ -14,6 +14,7 @@
     </script>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
     <style>
         .drop-zone-hover { background-color: rgb(55 65 81); }
     </style>
@@ -81,7 +82,7 @@
                     <div id="drop-zone" class="border-2 border-dashed border-gray-600 rounded-lg p-12 text-center cursor-pointer hover:border-blue-500 hover:bg-gray-750 transition-all bg-gray-900">
                         <i data-lucide="upload-cloud" class="w-16 h-16 text-gray-500 mx-auto mb-3"></i>
                         <p class="text-gray-300 mb-1">Drop files here or click to browse</p>
-                        <p class="text-xs text-gray-500">Maximum file size: 100MB</p>
+                        <p class="text-xs text-gray-500">Maximum file size: {% if max_file_size_mb >= 1024 %}{{ '%g'|format(max_file_size_mb / 1024) }} GiB{% else %}{{ max_file_size_mb }} MiB{% endif %}</p>
                     </div>
                     <input type="file" id="file-input" multiple class="hidden">
 
