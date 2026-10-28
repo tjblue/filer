@@ -3,7 +3,68 @@
 A directory-based file manager with file browsing, editing, search, expiring
 file and text sharing (Napkins), and recoverable Trash.
 
-## Install
+## Docker Compose (Linux server)
+
+Requires Git, Docker Engine, and the Docker Compose plugin on the server.
+Dependencies are installed when building the image. The container runs Waitress
+and uses a non-root user by default; no host Python installation is needed.
+
+```sh
+git clone https://github.com/tjblue/filer.git
+cd filer
+mkdir -p files filer-data
+printf 'FILER_UID=%s\nFILER_GID=%s\n' "$(id -u)" "$(id -g)" > .env
+docker compose up -d --build
+docker compose ps
+docker compose logs --tail=50 filer
+```
+
+The image defaults to UID/GID 1000. The `.env` command above makes Compose use
+your current server user's UID/GID so newly created bind directories are writable.
+That user needs read/write access to the managed files and `filer-data` directory.
+If you run the setup as root, the resulting UID/GID settings run the container as
+root as well; use the account that should own the files.
+
+Managed files are stored in `./files`. To serve an existing directory, add an
+absolute path such as `FILER_ROOT=/srv/my-files` to `.env` before starting. The
+directory must already exist. Filer metadata, Trash, Napkins, settings, and caches
+are persisted separately in `./filer-data`, mounted at `/app/data`. Container
+rebuilds and `docker compose down` preserve both bind directories. Back up both.
+Keep `filer-data` outside the managed directory.
+
+The default published address is **127.0.0.1:5000 on the server**. From your own
+computer, open an SSH tunnel:
+
+```sh
+ssh -N -L 5000:127.0.0.1:5000 your-user@your-server
+```
+
+Then open http://localhost:5000/ on your computer. Alternatively, use an
+authenticated reverse proxy on the server. For direct access on a trusted LAN,
+set `FILER_BIND` to the server's LAN IP in `.env` and run `docker compose up -d`.
+Filer has no built-in authentication; anyone who can reach the published service
+can read and modify files. `FILER_PORT` changes the published host port (default
+5000); the container continues to listen on port 5000.
+
+To update after new commits are pushed:
+
+```sh
+git pull --ff-only
+docker compose up -d --build
+```
+
+`docker compose pull` alone does not update Filer: this setup builds the application
+image from the cloned source. To refresh the Python base image as well, use
+`docker compose build --pull` followed by `docker compose up -d`.
+
+The Docker dependency list is exported from `uv.lock`. After changing dependencies,
+regenerate it with:
+
+```sh
+uv export --frozen --no-dev --no-emit-project --output-file requirements-docker.txt
+```
+
+## Install without Docker
 
 Requires Python 3.14 or newer. From this directory, install with uv:
 

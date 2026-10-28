@@ -9,6 +9,8 @@ data/archives/
 *.bak
 *.log
 .env
+filer-data/
+files/
 dist/
 build/
 *.egg-info/

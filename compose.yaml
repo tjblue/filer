@@ -1,0 +1,19 @@
+services:
+  filer:
+    build: .
+    restart: unless-stopped
+    init: true
+    user: "${FILER_UID:-1000}:${FILER_GID:-1000}"
+    ports:
+      - "${FILER_BIND:-127.0.0.1}:${FILER_PORT:-5000}:5000"
+    volumes:
+      - type: bind
+        source: ${FILER_ROOT:-./files}
+        target: /files
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ./filer-data
+        target: /app/data
+        bind:
+          create_host_path: false
