@@ -1,7 +1,56 @@
 # Filer
 
-A directory-based file manager with file browsing, editing, search, expiring
-file and text sharing (Napkins), and recoverable Trash.
+Filer is a self-hosted web file manager for a directory on your server. Browse
+and organize files from a browser, edit text, transfer files, and recover deleted
+items without setting up a database.
+
+![Filer file browser showing the sample directory](docs/images/browser.png)
+
+**[Install with Docker Compose](#docker-compose-linux-server)** · [Other installation options](#install-without-docker) · [Features](#features) · [Screenshots](#screenshots)
+
+> **Access matters:** Filer has no built-in authentication. Anyone who can
+> reach it can read and modify your files, Napkins, and Trash. Keep it bound to
+> localhost and use an SSH tunnel, or put it behind an authenticated HTTPS
+> reverse proxy before exposing it to other users.
+
+## Features
+
+- **Browse and organize:** navigate folders, create and rename items, upload and
+  download files, and copy, move, or duplicate selections.
+- **Find and edit:** search files and their contents, and edit text files in the
+  browser. Search uses ripgrep when available and falls back to Python.
+- **Work with photos and archives:** browse photos, download selections as ZIPs,
+  and inspect or extract ZIP archives.
+- **Transfer large files:** resumable chunked uploads support files up to 5 GiB.
+- **Share temporarily with Napkins:** store files or text with automatic
+  expiration (two hours by default, up to seven days).
+- **Recover mistakes:** deleted items go to Trash, with 14-day retention.
+- **Make it yours:** adjust appearance in Settings; the interface supports desktop
+  and mobile layouts.
+
+## Screenshots
+
+Browse your folders and preview photos directly in the file manager:
+
+![Photo thumbnails in the Filer file browser](docs/images/photos.png)
+
+Open and edit text files without leaving the browser:
+
+![Markdown file open in the Filer editor](docs/images/editor.png)
+
+Use Napkins for temporary file and text sharing with an expiration time:
+
+![Napkins temporary sharing page](docs/images/napkins.png)
+
+## Get started
+
+The easiest server installation is [Docker Compose](#docker-compose-linux-server).
+It builds Filer from this repository and runs it with persistent directories for
+your files and application data. No Python installation is needed on the host.
+For a local or non-container installation, see [Install without Docker](#install-without-docker).
+
+Once running, open the file browser at `/`, Napkins at `/napkins/`, Trash at
+`/trash/`, and Settings at `/settings/`.
 
 ## Docker Compose (Linux server)
 
