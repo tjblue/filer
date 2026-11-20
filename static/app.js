@@ -1,6 +1,7 @@
 // State
 let currentPath = '';
 let files = [];
+let fileDetailsOpen = window.innerWidth >= 1280;
 let selectedFiles = new Set();
 let currentViewingFile = null;
 let newItemIsFolder = false;
@@ -715,20 +716,20 @@ function renderBreadcrumbs(fileName = null) {
     const container = document.getElementById('breadcrumbs');
     const parts = currentPath ? currentPath.split('/') : [];
 
-    let html = `<span class="breadcrumb cursor-pointer text-blue-400 hover:text-blue-300" onclick="navigateTo('')">Root</span>`;
+    let html = `<button type="button" class="breadcrumb text-blue-400" onclick="navigateTo('')">Root</button>`;
 
     let pathSoFar = '';
     for (const part of parts) {
         pathSoFar += (pathSoFar ? '/' : '') + part;
         const p = pathSoFar;
         html += `<i data-lucide="chevron-right" class="w-4 h-4 text-gray-500"></i>`;
-        html += `<span class="breadcrumb cursor-pointer text-blue-400 hover:text-blue-300" onclick="navigateTo(${inlineArg(p)})">${escapeHtml(part)}</span>`;
+        html += `<button type="button" class="breadcrumb text-blue-400" onclick="navigateTo(${inlineArg(p)})">${escapeHtml(part)}</button>`;
     }
 
     // Show file name in breadcrumbs if viewing a file
     if (fileName) {
         html += `<i data-lucide="chevron-right" class="w-4 h-4 text-gray-500"></i>`;
-        html += `<span class="text-gray-100">${escapeHtml(fileName)}</span>`;
+        html += `<span class="text-gray-100" aria-current="page">${escapeHtml(fileName)}</span>`;
     }
 
     container.innerHTML = html;
@@ -998,6 +999,13 @@ function renderFiles() {
     document.getElementById('fileListView').classList.toggle('photo-mode-active', isMobile() && photoMode);
 
     updateSortIndicators();
+    const visible = getVisibleFiles();
+    const folders = visible.filter(file => file.isDirectory).length;
+    const regularFiles = visible.length - folders;
+    document.getElementById('browserTitle').textContent = currentPath.split('/').pop() || 'All files';
+    document.getElementById('browserSummary').textContent =
+        `${folders} ${folders === 1 ? 'folder' : 'folders'} · ${regularFiles} ${regularFiles === 1 ? 'file' : 'files'}`;
+    renderFileDetails(visible);
 
     if (files.length === 0) {
         tbody.innerHTML = '';
@@ -1034,59 +1042,7 @@ function renderFiles() {
     const previewScale = localStorage.getItem('filer-previewScale') || 'off';
     const sizes = PREVIEW_SIZES[previewScale];
 
-    tbody.innerHTML = sortedFiles.map(file => {
-        const icon = file.isDirectory ? 'folder' : getFileIcon(file.name);
-        const iconColor = file.isDirectory ? 'text-yellow-500' : 'text-gray-400';
-        const size = file.isDirectory ? '-' : formatSize(file.size);
-        const modified = formatDate(file.modified);
-        const selected = selectedFiles.has(file.path) ? 'selected' : '';
-
-        let iconHtml;
-        if (previewScale === 'off' || !sizes) {
-            iconHtml = `<i data-lucide="${icon}" class="w-5 h-5 ${iconColor}"></i>`;
-        } else if (!file.isDirectory && isImage(file.name)) {
-            iconHtml = `<img src="/api/thumb?path=${encodeURIComponent(file.path)}&size=${sizes.thumb}" loading="lazy" style="width:${sizes.thumb}px;height:${sizes.thumb}px;" class="object-cover rounded flex-shrink-0">`;
-        } else if (!file.isDirectory && isPdf(file.name)) {
-            const scale = sizes.thumb / 400;
-            iconHtml = `<div class="pdf-thumb" style="width:${sizes.thumb}px;height:${sizes.thumb}px;"><iframe src="/api/view?path=${encodeURIComponent(file.path)}#toolbar=0&navpanes=0&scrollbar=0" loading="lazy" style="transform:scale(${scale});"></iframe></div>`;
-        } else {
-            iconHtml = `<i data-lucide="${icon}" class="${iconColor}" style="width:${sizes.icon}px;height:${sizes.icon}px;"></i>`;
-        }
-
-        return `
-            <tr class="file-row border-b border-gray-700 ${selected}" data-path="${escapeHtml(file.path)}">
-                <td class="p-3">
-                    <input type="checkbox" class="file-checkbox rounded bg-gray-700 border-gray-600" data-path="${escapeHtml(file.path)}"
-                           ${selected ? 'checked' : ''} onchange="toggleSelect(${inlineArg(file.path)})">
-                </td>
-                <td class="p-3">
-                    <div class="flex items-center gap-2 cursor-pointer" onclick="handleClick(${inlineArg(file.path)}, ${file.isDirectory})">
-                        ${iconHtml}
-                        <span class="text-gray-100 hover:text-blue-400">${escapeHtml(file.name)}</span>
-                    </div>
-                </td>
-                <td class="p-3 text-sm text-gray-400">${size}</td>
-                <td class="p-3 text-sm text-gray-400">${modified}</td>
-                <td class="p-3">
-                    <div class="flex gap-1 justify-end">
-                        ${!file.isDirectory ? `
-                            <button onclick="event.stopPropagation(); downloadFile(${inlineArg(file.path)})" class="p-1.5 hover:bg-gray-700 rounded" title="Download">
-                                <i data-lucide="download" class="w-4 h-4 text-gray-400"></i>
-                            </button>
-                        ` : `
-                            <span class="p-1.5 w-8"></span>
-                        `}
-                        <button onclick="event.stopPropagation(); showRenameModal(${inlineArg(file.path)}, ${inlineArg(file.name)})" class="p-1.5 hover:bg-gray-700 rounded" title="Rename">
-                            <i data-lucide="pen-line" class="w-4 h-4 text-gray-400"></i>
-                        </button>
-                        <button onclick="event.stopPropagation(); deleteSingle(${inlineArg(file.path)})" class="p-1.5 hover:bg-gray-700 rounded" title="Delete">
-                            <i data-lucide="trash-2" class="w-4 h-4 text-red-400"></i>
-                        </button>
-                    </div>
-                </td>
-            </tr>
-        `;
-    }).join('');
+    tbody.innerHTML = sortedFiles.map(file => renderFileRow(file, sizes)).join('');
 
     lucide.createIcons();
 }
@@ -1149,6 +1105,46 @@ function renderFilesWithGroups(sortedFiles) {
     lucide.createIcons();
 }
 
+function toggleFileDetails() {
+    fileDetailsOpen = !fileDetailsOpen;
+    renderFileDetails(getVisibleFiles());
+    lucide.createIcons();
+}
+
+function renderFileDetails(visible) {
+    const panel = document.getElementById('fileDetails');
+    const toggle = document.getElementById('fileDetailsToggle');
+    panel.classList.toggle('hidden', !fileDetailsOpen);
+    toggle.setAttribute('aria-expanded', String(fileDetailsOpen));
+    if (!fileDetailsOpen) {
+        panel.innerHTML = '';
+        return;
+    }
+
+    const file = selectedFiles.size === 1
+        ? visible.find(item => selectedFiles.has(item.path))
+        : visible.find(item => !item.isDirectory && isImage(item.name)) ?? visible.find(item => !item.isDirectory);
+    const heading = '<h2 class="browser-inspector-heading">Details</h2>';
+    if (selectedFiles.size > 1 || !file) {
+        const message = selectedFiles.size > 1 ? `${selectedFiles.size} items selected` : 'Select an item to see its details.';
+        panel.innerHTML = heading + `<p class="text-gray-400">${message}</p>`;
+        return;
+    }
+
+    const preview = !file.isDirectory && isImage(file.name)
+        ? `<img src="/api/thumb?path=${encodeURIComponent(file.path)}&size=300" alt="" loading="lazy">`
+        : `<i data-lucide="${file.isDirectory ? 'folder' : getFileIcon(file.name)}" aria-hidden="true"></i>`;
+    panel.innerHTML = heading + `
+        <button type="button" class="browser-inspector-preview" aria-label="Open ${escapeHtml(file.name)}"
+                onclick="handleClick(${inlineArg(file.path)}, ${file.isDirectory})">${preview}</button>
+        <h3>${escapeHtml(file.name)}</h3>
+        <dl>
+            <div><dt>Type</dt><dd>${file.isDirectory ? 'Folder' : 'File'}</dd></div>
+            <div><dt>Size</dt><dd>${file.isDirectory ? '—' : formatSize(file.size)}</dd></div>
+            <div><dt>Modified</dt><dd>${escapeHtml(formatDate(file.modified))}</dd></div>
+        </dl>`;
+}
+
 // Render a single file row (extracted for reuse in grouped view)
 function renderFileRow(file, sizes) {
     const icon = file.isDirectory ? 'folder' : getFileIcon(file.name);
@@ -1177,8 +1173,8 @@ function renderFileRow(file, sizes) {
                        ${selected ? 'checked' : ''} onchange="toggleSelect(${inlineArg(file.path)})">
             </td>
             <td class="p-3">
-                <div class="flex items-center gap-2 cursor-pointer" onclick="handleClick(${inlineArg(file.path)}, ${file.isDirectory})">
-                    ${iconHtml}
+                <div class="browser-file-name flex items-center gap-2 cursor-pointer" onclick="handleClick(${inlineArg(file.path)}, ${file.isDirectory})">
+                    <span class="browser-file-icon${file.isDirectory ? ' is-folder' : ''}">${iconHtml}</span>
                     <span class="text-gray-100 hover:text-blue-400">${escapeHtml(file.name)}</span>
                 </div>
             </td>

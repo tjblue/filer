@@ -1,0 +1,20 @@
+<aside class="workspace-nav">
+    <a class="workspace-brand" href="/">
+        <span class="workspace-brand-mark"><i data-lucide="folder" aria-hidden="true"></i></span>
+        Filer
+    </a>
+    <p class="workspace-nav-label" aria-hidden="true">Workspace</p>
+    <nav aria-label="Workspace">
+        {% for key, label, link, icon in [
+            ('files', 'Files', '/', 'files'),
+            ('napkins', 'Napkins', '/napkins/', 'sticky-note'),
+            ('trash', 'Trash', '/trash/', 'trash-2'),
+            ('settings', 'Settings', '/settings/', 'settings')
+        ] %}
+        <a class="workspace-nav-link" href="{{ link }}"{% if section == key %} aria-current="page"{% endif %}>
+            <i data-lucide="{{ icon }}" aria-hidden="true"></i>
+            <span>{{ label }}</span>
+        </a>
+        {% endfor %}
+    </nav>
+</aside>

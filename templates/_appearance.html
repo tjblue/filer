@@ -1,0 +1,8 @@
+<script>
+    (function() {
+        var t = localStorage.getItem('filer-theme');
+        var f = localStorage.getItem('filer-fontSize');
+        if (t && t !== 'dark') document.documentElement.classList.add('theme-' + t);
+        if (f && f !== 'medium') document.documentElement.classList.add('font-' + f);
+    })();
+</script>

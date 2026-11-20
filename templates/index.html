@@ -6,14 +6,7 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <title>Filer</title>
-    <script>
-        (function() {
-            var t = localStorage.getItem('filer-theme');
-            var f = localStorage.getItem('filer-fontSize');
-            if (t && t !== 'dark') document.documentElement.classList.add('theme-' + t);
-            if (f && f !== 'medium') document.documentElement.classList.add('font-' + f);
-        })();
-    </script>
+    {% include '_appearance.html' %}
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
 
@@ -33,16 +26,38 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/addon/edit/matchbrackets.min.js"></script>
     <link rel="stylesheet" href="/_static/style.css">
 </head>
-<body class="bg-gray-900 min-h-screen">
-    <div id="app" class="max-w-6xl mx-auto p-4">
+<body class="filer-workspace bg-gray-900 min-h-screen">
+    {% with section='files' %}{% include '_workspace_nav.html' %}{% endwith %}
+    <div class="workspace-main">
+    <div id="app" class="browser-workspace workspace-content max-w-6xl mx-auto p-4">
+        <div class="browser-topbar">
+            <!-- Breadcrumbs -->
+            <nav id="breadcrumbsBar" class="workspace-breadcrumbs" aria-label="File path">
+                <div id="breadcrumbs" class="flex items-center gap-1 text-sm text-gray-400 flex-wrap">
+                    <button type="button" class="breadcrumb text-blue-400" onclick="navigateTo('')">Root</button>
+                </div>
+            </nav>
+            <!-- Search Bar -->
+            <div class="browser-search">
+                <div class="relative flex-1 md:w-64">
+                    <input type="text" id="searchInput" placeholder="Search files and contents" aria-label="Search files and contents"
+                           class="pl-9 pr-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-sm w-full outline-none focus:border-blue-500 text-gray-100 placeholder-gray-400">
+                    <i data-lucide="search" class="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2"></i>
+                </div>
+                <button onclick="performSearch()" class="px-3 py-2 bg-gray-700 text-gray-200 text-sm rounded-lg hover:bg-gray-600 whitespace-nowrap">
+                    Search
+                </button>
+            </div>
+        </div>
         <!-- Header -->
-        <div class="bg-gray-800 rounded-lg shadow-sm border border-gray-700 p-2 md:p-4 mb-4">
-            <div class="flex flex-col md:flex-row md:items-center justify-between gap-2 md:gap-4">
+        <div class="browser-header">
+            <div class="workspace-heading">
+                <span class="workspace-kicker">File browser</span>
+                <h1 id="browserTitle" class="workspace-title text-gray-100">All files</h1>
+                <p id="browserSummary" class="browser-summary text-gray-400"></p>
+            </div>
+            <div class="browser-tools">
                 <div class="file-header-main flex items-center gap-4 flex-wrap">
-                    <h1 class="text-xl font-semibold text-gray-100 flex items-center gap-2">
-                        <i data-lucide="folder-open" class="w-6 h-6 text-blue-400"></i>
-                        Filer
-                    </h1>
                     <!-- Mobile Actions Button -->
                     <button onclick="toggleMobileMenu()" id="mobileActionsBtn" class="px-3 py-2 bg-gray-700 text-gray-200 text-sm rounded-lg shadow hover:bg-gray-600 border border-gray-600 flex items-center gap-2">
                         <i data-lucide="plus" class="w-5 h-5"></i> Actions
@@ -85,7 +100,7 @@
                         <button onclick="toggleMoreMenu()" id="moreMenuBtn" class="px-3 py-1.5 bg-gray-700 text-gray-200 text-sm rounded-full shadow hover:bg-gray-600 hover:shadow-lg transition-all duration-200 flex items-center gap-2 border border-gray-600">
                             <i data-lucide="chevron-down" class="w-4 h-4"></i> <span class="hidden sm:inline">More</span>
                         </button>
-                        <div id="moreMenu" class="hidden absolute left-0 top-full mt-1 bg-gray-800 border border-gray-600 rounded-lg shadow-xl z-50 py-1 min-w-[160px]">
+                        <div id="moreMenu" class="hidden absolute right-0 top-full mt-1 bg-gray-800 border border-gray-600 rounded-lg shadow-xl z-50 py-1 min-w-[160px]">
                             <button onclick="closeMoreMenu(); setFileClipboard('move')" class="block w-full text-left px-4 py-2 text-sm text-gray-200 hover:bg-gray-700">Cut selected</button>
                             <button onclick="closeMoreMenu(); duplicateSelected()" class="block w-full text-left px-4 py-2 text-sm text-gray-200 hover:bg-gray-700">Duplicate selected</button>
                             <button onclick="closeMoreMenu(); browseSelectedArchive()" class="block w-full text-left px-4 py-2 text-sm text-gray-200 hover:bg-gray-700">Browse / extract ZIP</button>
@@ -102,26 +117,11 @@
                     </div>
                 </div>
                 </div>
-                <!-- Search Bar -->
-                <div class="flex items-center gap-2 w-full md:w-auto">
-                    <div class="relative flex-1 md:w-64">
-                        <input type="text" id="searchInput" placeholder="Search files..."
-                               class="pl-9 pr-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-sm w-full outline-none focus:border-blue-500 text-gray-100 placeholder-gray-400">
-                        <i data-lucide="search" class="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2"></i>
-                    </div>
-                    <button onclick="performSearch()" class="px-3 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 whitespace-nowrap">
-                        Search
-                    </button>
-                </div>
+
             </div>
         </div>
 
-        <!-- Breadcrumbs -->
-        <div id="breadcrumbsBar" class="mb-4 px-1">
-            <div id="breadcrumbs" class="flex items-center gap-1 text-sm text-gray-400 flex-wrap">
-                <span class="breadcrumb cursor-pointer text-blue-400" data-path="">Root</span>
-            </div>
-        </div>
+
 
         <div id="photoModeNotice" class="hidden mb-3 text-sm text-gray-300 items-center justify-between gap-2">
             <span>Showing photos and folders</span>
@@ -145,20 +145,26 @@
                     <button onclick="deleteSelected()" class="flex-1 px-2 bg-red-600 text-white rounded text-sm">Delete</button>
                 </div>
             </div>
-            <div class="bg-gray-800 rounded-lg shadow-sm border border-gray-700 overflow-hidden">
+            <div class="browser-list-bar">
+                <button type="button" id="fileDetailsToggle" class="browser-details-toggle" aria-controls="fileDetails" aria-expanded="false" onclick="toggleFileDetails()">
+                    <i data-lucide="panel-right" aria-hidden="true"></i> Details
+                </button>
+            </div>
+            <div class="browser-list-layout">
+            <div class="browser-list">
                 <table class="file-table w-full">
-                    <thead class="bg-gray-750 border-b border-gray-700" style="background-color: rgb(42 48 60);">
+                    <thead class="workspace-section-bar bg-gray-750 border-b border-gray-700">
                         <tr>
                             <th class="w-10 p-3">
-                                <input type="checkbox" id="selectAll" onchange="toggleSelectAll()" class="rounded bg-gray-700 border-gray-600">
+                                <input type="checkbox" id="selectAll" aria-label="Select all files" onchange="toggleSelectAll()" class="rounded bg-gray-700 border-gray-600">
                             </th>
-                            <th class="text-left p-3 text-sm font-medium text-gray-300 cursor-pointer hover:bg-gray-700 rounded" onclick="sortFiles('name')">
+                            <th class="text-left p-3 text-sm font-medium text-gray-300 cursor-pointer hover:bg-gray-700" onclick="sortFiles('name')">
                                 Name <span id="sortName" class="text-xs text-gray-500"></span>
                             </th>
-                            <th class="text-left p-3 text-sm font-medium text-gray-300 w-24 cursor-pointer hover:bg-gray-700 rounded" onclick="sortFiles('size')">
+                            <th class="text-left p-3 text-sm font-medium text-gray-300 w-24 cursor-pointer hover:bg-gray-700" onclick="sortFiles('size')">
                                 Size <span id="sortSize" class="text-xs text-gray-500"></span>
                             </th>
-                            <th class="text-left p-3 text-sm font-medium text-gray-300 w-44 cursor-pointer hover:bg-gray-700 rounded" onclick="sortFiles('modified')">
+                            <th class="text-left p-3 text-sm font-medium text-gray-300 w-44 cursor-pointer hover:bg-gray-700" onclick="sortFiles('modified')">
                                 Modified <span id="sortModified" class="text-xs text-gray-500"></span>
                             </th>
                             <th class="w-36 p-3 text-sm font-medium text-gray-300 text-right">Actions</th>
@@ -167,17 +173,18 @@
                     <tbody id="fileList">
                     </tbody>
                 </table>
-                <div id="emptyState" class="hidden p-8 text-center text-gray-400">
-                    <i data-lucide="folder-open" class="w-12 h-12 mx-auto mb-2 opacity-50"></i>
-                    <p>This folder is empty</p>
+                <div id="emptyState" class="hidden workspace-empty">
+                    <p>This folder is empty.</p>
                 </div>
+            </div>
+            <aside id="fileDetails" class="browser-inspector hidden" aria-label="File details"></aside>
             </div>
         </div>
 
         <!-- Search Results View -->
         <div id="searchResultsView" class="hidden">
             <div class="bg-gray-800 rounded-lg shadow-sm border border-gray-700 overflow-hidden">
-                <div class="p-4 border-b border-gray-700 flex items-center justify-between" style="background-color: rgb(42 48 60);">
+                <div class="workspace-section-bar p-4 border-b border-gray-700 flex items-center justify-between">
                     <div class="flex items-center gap-2">
                         <i data-lucide="search" class="w-5 h-5 text-gray-400"></i>
                         <span id="searchResultsTitle" class="font-medium text-gray-100">Search Results</span>
@@ -188,9 +195,8 @@
                 </div>
                 <div id="searchResultsList" class="divide-y divide-gray-700">
                 </div>
-                <div id="searchEmptyState" class="hidden p-8 text-center text-gray-400">
-                    <i data-lucide="search-x" class="w-12 h-12 mx-auto mb-2 opacity-50"></i>
-                    <p>No results found</p>
+                <div id="searchEmptyState" class="hidden workspace-empty">
+                    <p>No matching files found.</p>
                 </div>
                 <div id="searchTruncatedMsg" class="hidden p-3 bg-yellow-900 text-yellow-200 text-sm text-center">
                     Results limited. Try a more specific search.
@@ -202,7 +208,7 @@
         <div id="fileViewerView" class="hidden">
             <div class="bg-gray-800 rounded-lg shadow-sm border border-gray-700 overflow-hidden">
                 <!-- File Viewer Header -->
-                <div class="file-viewer-header flex items-center justify-between p-4 border-b border-gray-700" style="background-color: rgb(42 48 60);">
+                <div class="workspace-section-bar file-viewer-header flex items-center justify-between p-4 border-b border-gray-700">
                     <div class="flex items-center gap-3">
                         <button onclick="goToParentFolder()" class="p-2 hover:bg-gray-700 rounded" title="Back to folder">
                             <i data-lucide="arrow-left" class="w-5 h-5 text-gray-300"></i>
@@ -449,5 +455,6 @@
         </div>
     </div>
     <script src="/_static/app.js"></script>
+    </div>
 </body>
 </html>

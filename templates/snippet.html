@@ -3,14 +3,16 @@
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>{{ item.title }} - Quick Transfer</title>
+        <title>{{ item.title }} - Napkins</title>
+        {% include '_appearance.html' %}
         <script src="https://cdn.tailwindcss.com"></script>
         <script src="https://unpkg.com/lucide@latest"></script>
+        <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
     </head>
-    <body class="bg-gray-900 min-h-screen p-4">
-        <div class="max-w-4xl mx-auto">
+    <body class="filer-workspace workspace-standalone min-h-screen p-4">
+        <main class="max-w-4xl mx-auto">
             <div class="bg-gray-800 rounded-lg shadow-sm border border-gray-700 overflow-hidden">
-                <div class="p-4 border-b border-gray-700 flex items-center justify-between flex-wrap gap-3" style="background-color: rgb(42 48 60);">
+                <div class="workspace-section-bar p-4 border-b border-gray-700 flex items-center justify-between flex-wrap gap-3">
                     <div class="flex-1 min-w-0">
                         <h1 class="text-lg font-medium text-gray-100 truncate">{{ item.title }}</h1>
                         <div class="text-xs text-gray-400 mt-1 flex items-center gap-3 flex-wrap">
@@ -21,21 +23,21 @@
                             </span>
                         </div>
                     </div>
-                    <div class="flex gap-2">
+                    <div class="section-actions">
                         <button onclick="copyContent()" class="px-3 py-1.5 bg-blue-600 text-white text-sm rounded hover:bg-blue-700 flex items-center gap-1">
-                            <i data-lucide="copy" class="w-4 h-4"></i> Copy
+                            <i data-lucide="copy" class="w-3.5 h-3.5"></i> Copy
                         </button>
                         <a href="{{ url_for('quicktransfer.qt_raw_text', item_id=item.id) }}" class="px-3 py-1.5 bg-gray-700 text-gray-200 text-sm rounded hover:bg-gray-600 flex items-center gap-1">
-                            <i data-lucide="file-text" class="w-4 h-4"></i> Raw
+                            <i data-lucide="file-text" class="w-3.5 h-3.5"></i> Raw
                         </a>
                         <a href="{{ url_for('quicktransfer.napkins') }}" class="px-3 py-1.5 bg-gray-700 text-gray-200 text-sm rounded hover:bg-gray-600 flex items-center gap-1">
-                            <i data-lucide="arrow-left" class="w-4 h-4"></i> Back
+                            <i data-lucide="arrow-left" class="w-3.5 h-3.5"></i> Napkins
                         </a>
                     </div>
                 </div>
                 <pre id="content" class="p-6 text-sm text-gray-200 bg-gray-900 overflow-x-auto whitespace-pre-wrap break-words font-mono leading-relaxed">{{ item.content }}</pre>
             </div>
-        </div>
+        </main>
         <div id="toast" class="fixed bottom-4 right-4 px-4 py-2 rounded-lg shadow-lg text-white transform translate-y-20 transition-transform duration-300 bg-green-500"></div>
         <script>
             lucide.createIcons();
